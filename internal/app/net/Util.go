@@ -10,16 +10,17 @@ import(
 
 const PrefixLength int = 4
 
-func read_int(data []byte) (ret int) {
+func read_int32(data []byte) int {
+	var ret32 int32
   buf := bytes.NewBuffer(data)
-  binary.Read(buf, binary.LittleEndian, &ret)
-  return
+  binary.Read(buf, binary.LittleEndian, &ret32)
+  return int(ret32)
 }
 
 func GetNetworkMsgFromData(data [] byte) (*NetworkMsg) {
   dataLen := len(data)
   if dataLen >= PrefixLength {
-    msgLen := read_int(data)
+    msgLen := read_int32(data[:4])
     if dataLen - PrefixLength == msgLen {
       msgData := data[4:]
       return &NetworkMsg{Size: msgLen, Data: msgData}
