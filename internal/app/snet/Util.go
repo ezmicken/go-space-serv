@@ -1,26 +1,54 @@
-package net
+package snet
 
 import(
 	"encoding/binary"
+	"unicode/utf8"
 	"bytes"
 	"log"
+	"strings"
 
-	. "go-space-serv/internal/app/net/types"
+	. "go-space-serv/internal/app/snet/types"
 )
 
 const PrefixLength int = 4
 
-func read_int32(data []byte) int {
+// auto-incrementing id
+var nextId uint16 = 0
+func GetNextId() uint16 {
+	nextId += 1
+	return nextId
+}
+
+func Read_int32(data []byte) int {
 	var ret32 int32
   buf := bytes.NewBuffer(data)
   binary.Read(buf, binary.LittleEndian, &ret32)
   return int(ret32)
 }
 
+func Read_uint16(data []byte) uint16 {
+	var ret16 uint16
+	buf := bytes.NewBuffer(data)
+	binary.Read(buf, binary.LittleEndian, &ret16)
+	return ret16
+}
+
+func Read_utf8(data []byte) string {
+	var utf8Name strings.Builder
+	for len(data) > 0 {
+		r, size := utf8.DecodeRune(data)
+		utf8Name.WriteRune(r)
+		data = data[size:]
+	}
+
+	return utf8Name.String()
+}
+
+// Gets the whole message from the stream
 func GetNetworkMsgFromData(data [] byte) (*NetworkMsg) {
   dataLen := len(data)
   if dataLen >= PrefixLength {
-    msgLen := read_int32(data[:4])
+    msgLen := Read_int32(data[:4])
     if dataLen - PrefixLength == msgLen {
       msgData := data[4:]
       return &NetworkMsg{Size: msgLen, Data: msgData}

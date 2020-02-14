@@ -1,4 +1,6 @@
-package world
+package snet
+
+// one-byte indicator of client->server intent
 
 type ClientCmd byte
 

@@ -3,8 +3,7 @@ package world
 import(
 	"log"
 
-	. "go-space-serv/internal/app/net/types"
-	. "go-space-serv/internal/app/world/types"
+	. "go-space-serv/internal/app/snet/types"
 )
 
 type cmdMapInstance map[ClientCmd]func(input []byte)(*NetworkMsg)

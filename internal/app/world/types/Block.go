@@ -7,7 +7,7 @@ import(
 type BlockType byte
 
 const (
-	EMPTY = iota
+	EMPTY BlockType = iota
 	SOLID
 	GAS
 )
