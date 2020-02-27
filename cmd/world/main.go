@@ -7,7 +7,7 @@ import (
   "net"
 
   "github.com/panjf2000/gnet"
-  "github.com/panjf2000/gnet/pool"
+  "github.com/panjf2000/gnet/pool/goroutine"
 
   //"github.com/akavel/polyclip-go"
 
@@ -22,7 +22,7 @@ import (
 
 type worldServer struct {
   *gnet.EventServer
-  pool            *pool.WorkerPool
+  pool            *goroutine.Pool
   tick             time.Duration
   connectedSockets sync.Map
   state            ServerState
@@ -112,8 +112,7 @@ func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
 
 func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
   ws.physics = c
-  ws.physicsIP = c.RemoteAddr().(*net.TCPAddr).IP
-  ws.physicsPort = c.RemoteAddr().(*net.TCPAddr).Port
+  ws.physicsIP = snet.GetOutboundIP()
   ws.state = SETUP_PHYS
   log.Printf("Physics server connected.")
 
@@ -164,8 +163,8 @@ func (ws *worldServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
   return
 }
 
-func (ws *worldServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
-  data := append([]byte{}, c.Read()...)
+func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+  //data := append([]byte{}, c.Read()...)
   if isPhysicsConnection(c) {
     _ = ws.pool.Submit(func() {
       if ws.state == SETUP_PHYS && len(data) >= 4 {
@@ -247,7 +246,7 @@ func main() {
   wm.Generate()
   log.Printf("worldMap generated.")
 
-  p := pool.NewWorkerPool()
+  p := goroutine.Default()
   defer p.Release()
 
   ws := &worldServer{
