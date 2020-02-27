@@ -6,6 +6,7 @@ import(
 	"bytes"
 	"log"
 	"strings"
+	"net"
 
 	. "go-space-serv/internal/app/snet/types"
 )
@@ -17,6 +18,26 @@ var nextId uint16 = 0
 func GetNextId() uint16 {
 	nextId += 1
 	return nextId
+}
+
+// Get preferred outbound ip of this machine
+func GetOutboundIP() (net.IP) {
+    conn, err := net.Dial("udp", "8.8.8.8:80")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+
+    localAddr := conn.LocalAddr().(*net.UDPAddr).IP
+
+    return localAddr
+}
+
+func Read_int64(data []byte) int64 {
+	var ret64 int64
+	buf := bytes.NewBuffer(data)
+	binary.Read(buf, binary.LittleEndian, &ret64)
+	return ret64
 }
 
 func Read_int32(data []byte) int {
