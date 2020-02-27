@@ -6,10 +6,11 @@ import (
   "time"
   "net"
   "bufio"
+  //"runtime"
   //"runtime/debug"
 
   "github.com/panjf2000/gnet"
-  "github.com/panjf2000/gnet/pool"
+  "github.com/panjf2000/gnet/pool/goroutine"
   "github.com/bgadrian/data-structures/priorityqueue"
 
   //"github.com/bxcodec/saint" // integer math
@@ -22,21 +23,41 @@ import (
   "go-space-serv/internal/app/world"
 )
 
+// physicsServer's job is to run the physics simulation
+// and propagate input between clients.
+// The simulation runs at 30fps and the loop runs
+// at or near 120fps.
+// server chooses a time to start simulation
+// and updates it every 256 frames.
+// server sends this time to clients so that they
+// can simulate from the same time as well. This
+// keeps the numbers from growing too large.
+
 type physicsServer struct {
   *gnet.EventServer
-  pool            	*pool.WorkerPool
-  tick             	time.Duration
-  playerCount			  int    			// count of connectedPlayers
-  connectedPlayers 	sync.Map		// player id <-> UdpPlayer
-  controlMap        sync.Map    // player id <-> UdpBody
-  inputs            *priorityqueue.HierarchicalQueue // Inputs that are not part of the simulation
-  bodies 						[]*UdpBody
-  seq								byte
-  worldConn         net.Conn
-  //worldConnReader   *bufio.Reader
-  worldMap					world.WorldMap
-  worldMapBytes     []byte
-  worldMapLen				int
+  pool            	*goroutine.Pool
+
+  // Simulation data
+  playerCount			  	int    			// count of connectedPlayers
+  connectedPlayers 		sync.Map		// player id <-> UdpPlayer
+  controlMap        	sync.Map    // player id <-> UdpBody
+  inputs            	*priorityqueue.HierarchicalQueue // Inputs that are not part of the simulation
+  bodies 							[]*UdpBody
+
+	// Timing
+  seq									byte					// incremented each simulation frame, sync when rolls over
+  launchTime        	int64					// unix nanos when the program started
+  lastSync						int64 				// unix nanos the last time sync was performed
+  lastFrame           int64					// unix nanos since the last simulation frame
+  framesSinceLastSync int64					// simulation frames since last sync
+  tick								time.Duration // loop speed
+  TIMESTEP            int64					// simulation speed
+
+  // World map data
+  worldConn         	net.Conn
+  worldMap						world.WorldMap
+  worldMapBytes     	[]byte
+  worldMapLen					int
 }
 
 // protocol constants
@@ -94,40 +115,6 @@ func (ps *physicsServer) spawnPlayer(in UdpInput) {
 	log.Printf("Spawning %s at %d/%d -- %f/%f", p.GetName(), spawnX, spawnY, x, y)
 }
 
-func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
-	playerName := i.GetName()
-	p, ok := ps.connectedPlayers.Load(playerName)
-	if !ok {
-		log.Printf("Attempting to interpret command from unknown player %s", playerName)
-	} else {
-		player := p.(*UdpPlayer)
-		// TODO: authenticate
-		if i.GetType() == HELLO && !player.IsActive(){
-			log.Printf("%s connected.", playerName)
-			player.Activate()
-			player.SetState(SPECTATING)
-			player.SetConnection(c)
-
-			var msg NetworkMsg
-			msg.PutByte(byte(SSync))
-			msg.PutUint64(makeTimestamp())
-			msg.PutByte(ps.seq)
-			c.SendTo(snet.GetDataFromNetworkMsg(&msg))
-		}
-
-		// If the player is controlling a body
-		// add the input to the body.
-		bod, ok := ps.controlMap.Load(playerName)
-		if ok && bod != nil {
-			bod.(*UdpBody).QueueInput(&i)
-		} else {
-			ps.inputs.Enqueue(i, uint8(ps.seq))
-		}
-	}
-
-	return
-}
-
 func (ps *physicsServer) NewPlayer(id string) {
 	player := NewUdpPlayer(id)
 	player.SetStats(NewPlayerStats())
@@ -149,13 +136,65 @@ func (ps *physicsServer) RemovePlayer(id string) {
 	log.Printf("%s left the simulation", id)
 }
 
+func (ps *physicsServer) SyncPlayers(syncTime int64) {
+	var syncMsg NetworkMsg
+	syncMsg.PutByte(byte(SSync))
+	syncMsg.PutUint64(uint64(syncTime  / (int64(time.Millisecond)/int64(time.Nanosecond))))
+
+	syncMsgData := snet.GetDataFromNetworkMsg(&syncMsg)
+
+	ps.lastSync = syncTime
+
+	ps.connectedPlayers.Range(func(key, value interface{}) bool {
+		// TODO: customize frame for each player
+		p := value.(*UdpPlayer)
+		conn := p.GetConnection()
+
+		if p.IsActive() {
+			p.Sync(syncTime)
+			conn.SendTo(syncMsgData)
+			log.Printf("Synced %s", p.GetName())
+		}
+
+		return true
+	})
+}
+
 
 // Event Loop
 /////////////////
 
-func (ps *physicsServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
+func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
+	playerName := i.GetName()
+	p, ok := ps.connectedPlayers.Load(playerName)
+	if !ok {
+		log.Printf("Attempting to interpret command from unknown player %s", playerName)
+	} else {
+		player := p.(*UdpPlayer)
+		// TODO: authenticate
+		if i.GetType() == HELLO && !player.IsActive(){
+			log.Printf("%s connected.", playerName)
+			player.Activate()
+			player.SetState(SPECTATING)
+			player.SetConnection(c)
+		}
+
+		// If the player is controlling a body
+		// add the input to the body.
+		bod, ok := ps.controlMap.Load(playerName)
+		if ok && bod != nil {
+			bod.(*UdpBody).QueueInput(&i)
+		} else {
+			ps.inputs.Enqueue(i, uint8(ps.seq))
+		}
+	}
+
+	return
+}
+
+func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
 	//log.Printf("%s", c.RemoteAddr())
-	data := append([]byte{}, c.ReadFromUDP()...)
+	//data := append([]byte{}, c.ReadFromUDP()...)
   _ = ps.pool.Submit(func() {
     if len(data) >= 4 {
       msg := snet.GetNetworkMsgFromData(data)
@@ -172,96 +211,156 @@ func (ps *physicsServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
   return
 }
 
-func (ps *physicsServer) Tick() (delay time.Duration, action gnet.Action) {
-  frameStart := time.Now()
-
-  if ps.playerCount > 0 {
-  	// TODO: use priority and timing to
-  	// decide how many inputs to process.
-  	nonBodyInputs := ps.inputs.Len()
-  	for i := 0; i < nonBodyInputs; i++ {
-	  	in, err := ps.inputs.Dequeue()
-	  	if err != nil {
-	  		break
-	  	}
-
-	  	inp := in.(UdpInput)
-
-			if err == nil && inp.GetType() == SPAWN {
-				ps.spawnPlayer(inp)
-	  	}
-  	}
-
-		// update sequence -- go automatically roll it over from 255 -> 0
-  	ps.seq++;
-
-		// initialize the frame
-		frame := NewUdpFrame(ps.seq)
-
-		// Update all bodies
-		// flag dead bodies for removal
-		// process live bodies
-		// replace ps.bodies with filtered list
-		filteredBodies := ps.bodies[:0]
-		for i, b := range ps.bodies {
-			if !b.IsDead() {
-				filteredBodies = append(filteredBodies, b)
-			} else {
-				ps.bodies[i] = nil
-				continue
-			}
-			player := b.GetControllingPlayer()
-			if player != nil {
-				b.ProcessInput()
-			} else {
-				log.Printf("player is nil on controlled body %d", b.GetId());
-			}
-
-			b.ApplyTransform()
-
-			frame.AddUdpBody(b)
-		}
-		ps.bodies = filteredBodies
-
-		if frame.Len() > 0 {
-			serializedFrame := frame.Serialize()
-			var frameMsg NetworkMsg
-			frameMsg.PutByte(byte(SFrame))
-			frameMsg.PutByte(ps.seq)
-			frameMsg.PutBytes(serializedFrame)
-			frameData := snet.GetDataFromNetworkMsg(&frameMsg)
-
-			//gather inputs and update frame
-			ps.connectedPlayers.Range(func(key, value interface{}) bool {
-				// TODO: customize frame for each player
-				p := value.(*UdpPlayer)
-				if p.IsActive() {
-					conn := p.GetConnection()
-					conn.SendTo(frameData)
-					//log.Printf("SENT: %08b", frameData)
-				}
-				return true;
-			})
-		}
-	}
-
-	elapsed := time.Since(frameStart)
-	if (elapsed < ps.tick) {
-	 	//log.Printf("%d", elapsed)
-		delay = ps.tick - elapsed
-	} else if (elapsed > ps.tick) {
-		log.Printf("Processed frame too slow!!!!!!!!")
-	} else {
-		delay = 0
-	}
-
-  return
-}
-
 func (ps *physicsServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
 	log.Printf("UDP server is listening on %s (multi-cores: %t, loops: %d)\n",
 		srv.Addr.String(), srv.Multicore, srv.NumLoops)
 	return
+}
+
+// Process physics for one frame
+func (ps *physicsServer) Simulate(frameStart int64) {
+	// initialize the frame
+	frame := NewUdpFrame(ps.seq)
+
+	// Update all bodies
+	// flag dead bodies for removal
+	// process live bodies
+	// replace ps.bodies with filtered list
+	filteredBodies := ps.bodies[:0]
+	for i, b := range ps.bodies {
+		if !b.IsDead() {
+			filteredBodies = append(filteredBodies, b)
+		} else {
+			ps.bodies[i] = nil
+			continue
+		}
+		player := b.GetControllingPlayer()
+		if player != nil && player.IsActive() {
+			b.ProcessInput(frameStart / (int64(time.Millisecond)/int64(time.Nanosecond)))
+		} else {
+			log.Printf("player is nil on controlled body %d", b.GetId());
+		}
+
+		b.ApplyTransform()
+
+		frame.AddUdpBody(b)
+	}
+	ps.bodies = filteredBodies
+
+	if frame.Len() > 0 {
+		serializedFrame := frame.Serialize()
+		var frameMsg NetworkMsg
+		frameMsg.PutByte(byte(SFrame))
+		frameMsg.PutByte(ps.seq)
+		frameMsg.PutBytes(serializedFrame)
+		frameData := snet.GetDataFromNetworkMsg(&frameMsg)
+
+		// Send the frame to relevent players.
+		ps.connectedPlayers.Range(func(key, value interface{}) bool {
+			// TODO: customize frame for each player
+			p := value.(*UdpPlayer)
+			if p.IsActive() {
+				conn := p.GetConnection()
+				conn.SendTo(frameData)
+			}
+			return true
+		})
+	}
+}
+
+// Simulation loop
+func (ps *physicsServer) Simulation() {
+	simulationStart := time.Now().UnixNano()
+	ps.lastSync = simulationStart
+	shouldSync := false
+
+	for {
+		frameStartTime := time.Now()
+		frameStart := frameStartTime.UnixNano()
+		if ps.playerCount > 0 {
+			// Determine whether to process a simulation frame
+			framesToProcess := ((frameStart - ps.lastSync) / ps.TIMESTEP) - ps.framesSinceLastSync
+			if framesToProcess > 0 {
+				for i := int64(0); i < framesToProcess; i++ {
+					ps.seq++;
+					ps.framesSinceLastSync++;
+					ps.lastFrame = ps.lastSync + (ps.framesSinceLastSync * ps.TIMESTEP)
+					ps.Simulate(ps.lastFrame)
+
+					if ps.seq == 0 {
+						shouldSync = true
+					}
+				}
+			} else if shouldSync {
+				log.Printf("SYNC")
+				ps.SyncPlayers(ps.lastFrame)
+				shouldSync = false
+				ps.framesSinceLastSync = 0
+			} else {
+		  	nonBodyInputs := ps.inputs.Len()
+		  	for i := 0; i < nonBodyInputs; i++ {
+			  	in, err := ps.inputs.Dequeue()
+			  	if err != nil {
+			  		log.Printf(err.Error())
+			  		break
+			  	}
+
+			  	inp := in.(UdpInput)
+
+					if err == nil && inp.GetType() == SPAWN {
+						ps.spawnPlayer(inp)
+			  	}
+		  	}
+			}
+
+		}
+
+		elapsed := time.Since(frameStartTime);
+		if ps.tick > elapsed {
+			time.Sleep(ps.tick - elapsed)
+		} else {
+			time.Sleep(32)
+		}
+	}
+}
+
+func main() {
+  p := goroutine.Default()
+  defer p.Release()
+
+  // connect via TCP to the world server
+	dialer := &net.Dialer{
+		LocalAddr: &net.TCPAddr{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: 9499,
+		},
+	}
+  conn, err := dialer.Dial("tcp", "127.0.0.1:9494")
+  if err != nil {
+  	log.Printf("%s", err)
+  }
+  defer conn.Close()
+
+  // Initialize UDP server
+  ps := &physicsServer{
+  	pool: p,
+  	bodies: []*UdpBody{},
+  	tick: 8333333,
+  	TIMESTEP: 34000000,
+  	seq: 0,
+  	launchTime: time.Now().UnixNano(),
+  	lastSync: 0,
+  	framesSinceLastSync: 0,
+  	lastFrame: 0,
+  	inputs: priorityqueue.NewHierarchicalQueue(255, true),
+  	worldConn: conn,
+  }
+
+  // react to events from world server
+  go ps.ReactWorld(conn)
+  go ps.Simulation()
+
+  log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
 }
 
 // world server <-> physics server interaction
@@ -380,37 +479,4 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
 		}
 		time.Sleep(1 * time.Second)
 	}
-}
-
-func main() {
-  p := pool.NewWorkerPool()
-  defer p.Release()
-
-  // connect via TCP to the world server
-	dialer := &net.Dialer{
-		LocalAddr: &net.TCPAddr{
-			IP:   net.ParseIP("127.0.0.1"),
-			Port: 9499,
-		},
-	}
-  conn, err := dialer.Dial("tcp", "127.0.0.1:9494")
-  if err != nil {
-  	log.Printf("%s", err)
-  }
-  defer conn.Close()
-
-  // Initialize UDP server
-  ps := &physicsServer{
-  	pool: p,
-  	tick: 30000000,
-  	seq: 0,
-  	bodies: []*UdpBody{},
-  	worldConn: conn,
-  	inputs: priorityqueue.NewHierarchicalQueue(255, true),
-  }
-
-  // react to events from world server
-  go ps.ReactWorld(conn)
-
-  log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
 }
