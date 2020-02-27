@@ -16,6 +16,7 @@ const (
 type UdpPlayer struct {
 	name string
 	active bool
+	lastSync int64
 	connection gnet.Conn
 	state UdpPlayerState
 	stats *PlayerStats
@@ -26,6 +27,7 @@ func NewUdpPlayer(n string) *UdpPlayer{
 	p.name = n
 	p.active = false
 	p.state = CONNECTED
+	p.lastSync = 0
 	return &p
 }
 
@@ -67,5 +69,13 @@ func (p *UdpPlayer) SetConnection(c gnet.Conn) {
 
 func (p *UdpPlayer) GetConnection() gnet.Conn {
 	return p.connection
+}
+
+func (p *UdpPlayer) Sync(time int64) {
+	p.lastSync = time
+}
+
+func (p *UdpPlayer) GetLastSync() int64 {
+	return p.lastSync;
 }
 
