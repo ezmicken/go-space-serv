@@ -3,7 +3,7 @@ package phys
 import (
 	"encoding/binary"
 	"bytes"
-	"log"
+	//"log"
 
 	"go-space-serv/internal/app/snet"
 
@@ -29,10 +29,15 @@ type UdpBody struct {
 	yPos float32
 	xVel float32
 	yVel float32
-	rot  uint16
+	rot  int16
 	xAcc float32
 	yAcc float32
 }
+
+const LEFT byte = 0;
+const RIGHT byte = 1;
+const FORWARD byte = 2;
+const BACKWARD byte = 3;
 
 func (b *UdpBody) Serialize() []byte {
 	var buf bytes.Buffer
@@ -66,6 +71,7 @@ func NewUdpBody() (*UdpBody) {
 	b.yVel = 0
 	b.xAcc = 0
 	b.yAcc = 0
+	b.rot = 0
 	// xPos, yPos set when player spawn
 
 	b.dead = false;
@@ -97,42 +103,66 @@ func (b *UdpBody) DequeueInput() *UdpInput {
 	return nil
 }
 
-func (b *UdpBody) ProcessInput() {
-	// TODO: figure out how priority comes into play here
+func readInput(data []byte, offset int) (byte, int64, int64) {
+	movementType := data[offset];
+	start := snet.Read_int64(data[offset+1:offset+9])
+	end := snet.Read_int64(data[offset+9:offset+17])
+
+	return movementType, start, end
+}
+
+func applyStat(stat float32, frameStart int64, inputStart int64, inputEnd int64) float32 {
+	result := float32(0.0)
+
+	if inputEnd != 0 {
+		result += (stat * (float32(inputEnd - inputStart) / float32(1000.0)))
+	} else if (frameStart > inputStart) {
+		result += (stat * (float32(frameStart - inputStart) / float32(1000.0)))
+	}
+
+	return result
+}
+
+func (b *UdpBody) ProcessInput(frameStart int64) {
 	for i := b.DequeueInput(); i != nil; {
-		// handle input
 		if (i.GetType() == MOVE) {
-			// MOVE = type | value | type2 | value2 | ...
-			// 0 + 0 = thrust forward
-			// 0 + 1 = thrust backward
-			// 1 + 0 = rotate left
-			// 1 + 1 = rotate right
 			data := i.GetContent()
 			dataLen := len(data)
 			accel := float32(0.0)
+			degrees := float32(0.0)
 			stats := b.controllingPlayer.GetStats()
 			remaining := dataLen
 
 			for j := 0; remaining > 0; j++ {
-				movementType := data[j]
+				movementType, start, end := readInput(data, j)
+				remaining -= 17
 
-				if movementType == 0 {
-					movementVal := data[j+1]
-					movementAngle := data[j+2:j+4]
-
-					if movementVal == 0 {
-						accel = stats.Acceleration
-					} else if movementVal == 1 {
-						accel = -stats.Acceleration
-					}
-
-					b.rot = snet.Read_uint16(movementAngle)
-
-					remaining -= 4
-				} else {
-					log.Printf("Received movementType=%d from %s", movementType, b.controllingPlayer.GetName())
+				if movementType == LEFT {
+					//log.Printf("%d -- %d -- %d", frameStart, start, end);
+					degrees += applyStat(stats.Rotation, frameStart, start, end)
+				}
+				if movementType == RIGHT {
+					degrees -= applyStat(stats.Rotation, frameStart, start, end)
+				}
+				if movementType == FORWARD {
+					accel += applyStat(stats.Thrust, frameStart, start, end)
+				}
+				if movementType == BACKWARD {
+					accel -= applyStat(stats.Thrust, frameStart, start, end)
 				}
 			}
+
+			// clamp b.rot to 0 - 360
+      if degrees != 0 {
+        b.rot += int16(degrees);
+        if b.rot > 360 {
+          b.rot -= 360;
+        } else if b.rot < 0 {
+          b.rot += 360;
+        }
+      }
+
+      //log.Printf("%d", b.rot)
 
 			// TODO: apply rotation
 			if accel != 0 {
@@ -201,11 +231,11 @@ func (b *UdpBody) GetId() uint16 {
 	return b.id
 }
 
-func (b *UdpBody) SetRot(r uint16) {
+func (b *UdpBody) SetRot(r int16) {
 	b.rot = r
 }
 
-func (b *UdpBody) GetRot() uint16 {
+func (b *UdpBody) GetRot() int16 {
 	return b.rot
 }
 
