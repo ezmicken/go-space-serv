@@ -83,7 +83,7 @@ func NewUdpBody() (*UdpBody) {
 //////////////////////
 
 func (b *UdpBody) QueueInput(i *UdpInput) {
-	b.inputs.Enqueue(i, i.seq)
+	b.inputs.Enqueue(i, 1)
 }
 
 func (b *UdpBody) DequeueInput() *UdpInput {
