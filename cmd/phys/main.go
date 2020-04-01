@@ -45,7 +45,7 @@ type physicsServer struct {
   bodies 							[]*UdpBody
 
 	// Timing
-  seq									byte					// incremented each simulation frame, sync when rolls over
+  seq									uint16				// incremented each simulation frame, sync when rolls over
   launchTime        	int64					// unix nanos when the program started
   lastSync						int64 				// unix nanos the last time sync was performed
   lastFrame           int64					// unix nanos since the last simulation frame
@@ -139,6 +139,7 @@ func (ps *physicsServer) RemovePlayer(id string) {
 func (ps *physicsServer) SyncPlayers(syncTime int64) {
 	var syncMsg NetworkMsg
 	syncMsg.PutByte(byte(SSync))
+	syncMsg.PutUint16(ps.seq)
 	syncMsg.PutUint64(uint64(syncTime  / (int64(time.Millisecond)/int64(time.Nanosecond))))
 
 	syncMsgData := snet.GetDataFromNetworkMsg(&syncMsg)
@@ -148,16 +149,30 @@ func (ps *physicsServer) SyncPlayers(syncTime int64) {
 	ps.connectedPlayers.Range(func(key, value interface{}) bool {
 		// TODO: customize frame for each player
 		p := value.(*UdpPlayer)
-		conn := p.GetConnection()
+
 
 		if p.IsActive() {
 			p.Sync(syncTime)
-			conn.SendTo(syncMsgData)
+			p.GetConnection().SendTo(syncMsgData)
 			log.Printf("Synced %s", p.GetName())
 		}
 
 		return true
 	})
+}
+
+func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
+	log.Printf("Syncing %s", p.GetName())
+	var syncMsg NetworkMsg
+	syncMsg.PutByte(byte(SSync))
+	syncMsg.PutUint16(ps.seq)
+	syncMsg.PutUint64(uint64(syncTime / (int64(time.Millisecond)/int64(time.Nanosecond))))
+
+	if p.IsActive() {
+		p.Sync(syncTime)
+		p.GetConnection().SendTo(snet.GetDataFromNetworkMsg(&syncMsg))
+		log.Printf("Synced %s", p.GetName())
+	}
 }
 
 
@@ -177,6 +192,7 @@ func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
 			player.Activate()
 			player.SetState(SPECTATING)
 			player.SetConnection(c)
+			ps.SyncPlayer(player, ps.lastSync)
 		}
 
 		// If the player is controlling a body
@@ -201,7 +217,7 @@ func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gne
       if msg != nil {
       	var i UdpInput
       	i.Deserialize(msg)
-      	//log.Printf("%s", i.String())
+      	log.Printf("%s", i.String())
 
       	out = ps.interpret(i, c);
       }
@@ -251,7 +267,7 @@ func (ps *physicsServer) Simulate(frameStart int64) {
 		serializedFrame := frame.Serialize()
 		var frameMsg NetworkMsg
 		frameMsg.PutByte(byte(SFrame))
-		frameMsg.PutByte(ps.seq)
+		frameMsg.PutUint16(ps.seq)
 		frameMsg.PutBytes(serializedFrame)
 		frameData := snet.GetDataFromNetworkMsg(&frameMsg)
 
@@ -272,47 +288,43 @@ func (ps *physicsServer) Simulate(frameStart int64) {
 func (ps *physicsServer) Simulation() {
 	simulationStart := time.Now().UnixNano()
 	ps.lastSync = simulationStart
+	ps.seq = 0
 	shouldSync := false
 
 	for {
 		frameStartTime := time.Now()
 		frameStart := frameStartTime.UnixNano()
-		if ps.playerCount > 0 {
-			// Determine whether to process a simulation frame
-			framesToProcess := ((frameStart - ps.lastSync) / ps.TIMESTEP) - ps.framesSinceLastSync
-			if framesToProcess > 0 {
-				for i := int64(0); i < framesToProcess; i++ {
-					ps.seq++;
-					ps.framesSinceLastSync++;
-					ps.lastFrame = ps.lastSync + (ps.framesSinceLastSync * ps.TIMESTEP)
-					ps.Simulate(ps.lastFrame)
+		framesToProcess := ((frameStart - ps.lastSync) / ps.TIMESTEP) - int64(ps.seq)
+		if framesToProcess > 0 {
+			for i := int64(0); i < framesToProcess; i++ {
+				ps.seq++;
+				ps.lastFrame = ps.lastSync + (int64(ps.seq) * ps.TIMESTEP)
+				ps.Simulate(ps.lastFrame)
 
-					if ps.seq == 0 {
-						shouldSync = true
-					}
+				if ps.seq == 0 {
+					shouldSync = true;
+					ps.seq = 1
 				}
-			} else if shouldSync {
-				log.Printf("SYNC")
-				ps.SyncPlayers(ps.lastFrame)
-				shouldSync = false
-				ps.framesSinceLastSync = 0
-			} else {
-		  	nonBodyInputs := ps.inputs.Len()
-		  	for i := 0; i < nonBodyInputs; i++ {
-			  	in, err := ps.inputs.Dequeue()
-			  	if err != nil {
-			  		log.Printf(err.Error())
-			  		break
-			  	}
-
-			  	inp := in.(UdpInput)
-
-					if err == nil && inp.GetType() == SPAWN {
-						ps.spawnPlayer(inp)
-			  	}
-		  	}
 			}
+		} else if shouldSync && ps.playerCount > 0 {
+			log.Printf("SYNC")
+			ps.SyncPlayers(ps.lastFrame)
+			shouldSync = false;
+		} else {
+	  	nonBodyInputs := ps.inputs.Len()
+	  	for i := 0; i < nonBodyInputs; i++ {
+		  	in, err := ps.inputs.Dequeue()
+		  	if err != nil {
+		  		log.Printf(err.Error())
+		  		break
+		  	}
 
+		  	inp := in.(UdpInput)
+
+				if err == nil && inp.GetType() == SPAWN {
+					ps.spawnPlayer(inp)
+		  	}
+	  	}
 		}
 
 		elapsed := time.Since(frameStartTime);

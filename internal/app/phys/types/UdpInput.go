@@ -25,7 +25,7 @@ const (
 )
 
 type UdpInput struct {
-	seq byte
+	seq uint16
 	iType UdpInputType
 	playerName string
 	content []byte
@@ -35,7 +35,7 @@ func (i *UdpInput) GetType() UdpInputType {
 	return i.iType
 }
 
-func (i *UdpInput) GetSeq() byte {
+func (i *UdpInput) GetSeq() uint16 {
 	return i.seq
 }
 
@@ -55,13 +55,13 @@ func (i *UdpInput) Deserialize (msg *NetworkMsg) {
 	// name
 	i.playerName = snet.Read_utf8(msg.Data[2:2+nameLength])
 
-	// Sequence value: 1 byte
-	i.seq = msg.Data[nameLength + 2]
+	// Sequence value: 2 byte
+	i.seq = snet.Read_uint16(msg.Data[nameLength + 2:nameLength + 4])
 
 	// Input type: 1 byte
-	i.iType = UdpInputType(msg.Data[nameLength + 3])
+	i.iType = UdpInputType(msg.Data[nameLength + 4])
 
-	i.content = msg.Data[nameLength + 4:]
+	i.content = msg.Data[nameLength + 5:]
 }
 
 func (i *UdpInput) String() string {

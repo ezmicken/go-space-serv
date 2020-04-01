@@ -4,11 +4,11 @@ package phys
 // (only send the bodies that each client is interested in)
 
 type UdpFrame struct {
-	seq byte
+	seq uint16
 	frame []*UdpBody
 }
 
-func NewUdpFrame(s byte) *UdpFrame {
+func NewUdpFrame(s uint16) *UdpFrame {
 	var f UdpFrame
 
 	f.seq = s
