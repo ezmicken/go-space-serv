@@ -13,14 +13,13 @@ import (
   "github.com/panjf2000/gnet/pool/goroutine"
   "github.com/bgadrian/data-structures/priorityqueue"
 
-  //"github.com/bxcodec/saint" // integer math
-
-  //"go-space-serv/internal/app/phys"
   "go-space-serv/internal/app/snet"
+  "go-space-serv/internal/app/helpers"
+  "go-space-serv/internal/app/world"
+
   . "go-space-serv/internal/app/player/types"
   . "go-space-serv/internal/app/phys/types"
   . "go-space-serv/internal/app/snet/types"
-  "go-space-serv/internal/app/world"
 )
 
 // physicsServer's job is to run the physics simulation
@@ -51,7 +50,6 @@ type physicsServer struct {
   lastFrame           int64					// unix nanos since the last simulation frame
   framesSinceLastSync int64					// simulation frames since last sync
   tick								time.Duration // loop speed
-  TIMESTEP            int64					// simulation speed
 
   // World map data
   worldConn         	net.Conn
@@ -64,21 +62,15 @@ type physicsServer struct {
 // message structure is as follows:
 // [ length, command, content ]
 //     4b       1b    <= 4091b
-const prefixLen int = 4
-const cmdLen int = 1
-const maxMsgSize int = 1500
-const udpAddr = "udp://:9495";
-const udpPort = 9495
+const prefixLen 	int 		= 4
+const cmdLen 			int 		= 1
+const maxMsgSize 	int 		= 1500
+const udpAddr 		string	= "udp://:9495";
+const udpPort 		int			= 9495
 
 // map constants
-const spawnX int = 500
-const spawnY int = 500
-
-// Helpers
-/////////////
-func makeTimestamp() uint64 {
-	return uint64(time.Now().UnixNano() / (int64(time.Millisecond)/int64(time.Nanosecond)))
-}
+const spawnX 			int 		= 500
+const spawnY 			int 		= 500
 
 // Actions
 /////////////
@@ -94,10 +86,9 @@ func (ps *physicsServer) spawnPlayer(in UdpInput) {
 	}
 
 	// OK, add body to simulation
-	pBod := NewControlledUdpBody(p)
 	x, y := ps.worldMap.GetCellCenter(spawnX, spawnY)
+	pBod := NewControlledUdpBody(p)
 	pBod.SetPos(x, y)
-	pBod.SetRot(0)
 	ps.bodies = append(ps.bodies, pBod)
 
 	// Map body <-> player for easier input assignment
@@ -166,7 +157,7 @@ func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
 	var syncMsg NetworkMsg
 	syncMsg.PutByte(byte(SSync))
 	syncMsg.PutUint16(ps.seq)
-	syncMsg.PutUint64(uint64(syncTime / (int64(time.Millisecond)/int64(time.Nanosecond))))
+	syncMsg.PutUint64(uint64(helpers.NanosToMillis(syncTime)))
 
 	if p.IsActive() {
 		p.Sync(syncTime)
@@ -174,7 +165,6 @@ func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
 		log.Printf("Synced %s", p.GetName())
 	}
 }
-
 
 // Event Loop
 /////////////////
@@ -209,15 +199,12 @@ func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
 }
 
 func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-	//log.Printf("%s", c.RemoteAddr())
-	//data := append([]byte{}, c.ReadFromUDP()...)
   _ = ps.pool.Submit(func() {
     if len(data) >= 4 {
       msg := snet.GetNetworkMsgFromData(data)
       if msg != nil {
       	var i UdpInput
       	i.Deserialize(msg)
-      	log.Printf("%s", i.String())
 
       	out = ps.interpret(i, c);
       }
@@ -237,6 +224,7 @@ func (ps *physicsServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
 func (ps *physicsServer) Simulate(frameStart int64) {
 	// initialize the frame
 	frame := NewUdpFrame(ps.seq)
+	frameStartMillis := helpers.NanosToMillis(frameStart)
 
 	// Update all bodies
 	// flag dead bodies for removal
@@ -250,9 +238,12 @@ func (ps *physicsServer) Simulate(frameStart int64) {
 			ps.bodies[i] = nil
 			continue
 		}
+
+		b.AdvanceHistory(frameStartMillis)
+
 		player := b.GetControllingPlayer()
 		if player != nil && player.IsActive() {
-			b.ProcessInput(frameStart / (int64(time.Millisecond)/int64(time.Nanosecond)))
+			b.ProcessInput(frameStartMillis)
 		} else {
 			log.Printf("player is nil on controlled body %d", b.GetId());
 		}
@@ -263,6 +254,7 @@ func (ps *physicsServer) Simulate(frameStart int64) {
 	}
 	ps.bodies = filteredBodies
 
+	// propagate input to clients
 	if frame.Len() > 0 {
 		serializedFrame := frame.Serialize()
 		var frameMsg NetworkMsg
@@ -285,20 +277,24 @@ func (ps *physicsServer) Simulate(frameStart int64) {
 }
 
 // Simulation loop
+// Determines when to process frames.
+// Initiates synchronization.
+// Processes input not related to bodies
 func (ps *physicsServer) Simulation() {
 	simulationStart := time.Now().UnixNano()
 	ps.lastSync = simulationStart
 	ps.seq = 0
 	shouldSync := false
+	timestepNano := helpers.GetConfiguredTimestepNanos()
 
 	for {
 		frameStartTime := time.Now()
 		frameStart := frameStartTime.UnixNano()
-		framesToProcess := ((frameStart - ps.lastSync) / ps.TIMESTEP) - int64(ps.seq)
+		framesToProcess := ((frameStart - ps.lastSync) / timestepNano) - int64(ps.seq)
 		if framesToProcess > 0 {
 			for i := int64(0); i < framesToProcess; i++ {
 				ps.seq++;
-				ps.lastFrame = ps.lastSync + (int64(ps.seq) * ps.TIMESTEP)
+				ps.lastFrame = ps.lastSync + (int64(ps.seq) * timestepNano)
 				ps.Simulate(ps.lastFrame)
 
 				if ps.seq == 0 {
@@ -340,6 +336,13 @@ func main() {
   p := goroutine.Default()
   defer p.Release()
 
+  // Populate config
+  // TODO: take this from flags
+  var config helpers.Config
+  config.TIMESTEP = 34
+  config.TIMESTEP_NANO = 34000000
+  helpers.SetConfig(&config)
+
   // connect via TCP to the world server
 	dialer := &net.Dialer{
 		LocalAddr: &net.TCPAddr{
@@ -350,6 +353,7 @@ func main() {
   conn, err := dialer.Dial("tcp", "127.0.0.1:9494")
   if err != nil {
   	log.Printf("%s", err)
+  	panic("couldnt find world server")
   }
   defer conn.Close()
 
@@ -358,7 +362,6 @@ func main() {
   	pool: p,
   	bodies: []*UdpBody{},
   	tick: 8333333,
-  	TIMESTEP: 34000000,
   	seq: 0,
   	launchTime: time.Now().UnixNano(),
   	lastSync: 0,
