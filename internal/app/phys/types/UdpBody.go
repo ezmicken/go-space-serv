@@ -6,8 +6,8 @@ import (
 	//"log"
 
 	"go-space-serv/internal/app/snet"
+	"go-space-serv/internal/app/helpers"
 
-	//"github.com/stojg/vector"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/bgadrian/data-structures/priorityqueue"
 )
@@ -22,6 +22,7 @@ type UdpBody struct {
 	inputs            *priorityqueue.HierarchicalQueue
 	dead              bool
 
+	history 					*TransformRing
 	// these are sent to clients
 	// these are listed by priority in ascending order
 	id   uint16
@@ -29,15 +30,15 @@ type UdpBody struct {
 	yPos float32
 	xVel float32
 	yVel float32
-	rot  int16
+	rot  float32
 	xAcc float32
 	yAcc float32
 }
 
-const LEFT byte = 0;
-const RIGHT byte = 1;
-const FORWARD byte = 2;
-const BACKWARD byte = 3;
+const LEFT byte = 1;
+const RIGHT byte = 2;
+const FORWARD byte = 3;
+const BACKWARD byte = 4;
 
 func (b *UdpBody) Serialize() []byte {
 	var buf bytes.Buffer
@@ -59,8 +60,15 @@ func NewControlledUdpBody(player *UdpPlayer) (*UdpBody) {
 	bod.controllingPlayer = player
 	bod.owningPlayer = player
 	bod.dead = false;
-
+	bod.history = NewTransformRing(1024)
 	bod.inputs = priorityqueue.NewHierarchicalQueue(255, true)
+
+	bod.xPos = 0
+	bod.yPos = 0
+	bod.xVel = 0
+	bod.yVel = 0
+	bod.rot = 0
+
 	return bod
 }
 
@@ -111,82 +119,125 @@ func readInput(data []byte, offset int) (byte, int64, int64) {
 	return movementType, start, end
 }
 
-func applyStat(stat float32, frameStart int64, inputStart int64, inputEnd int64) float32 {
-	result := float32(0.0)
-
-	if inputEnd != 0 {
-		result += (stat * (float32(inputEnd - inputStart) / float32(1000.0)))
-	} else if (frameStart > inputStart) {
-		result += (stat * (float32(frameStart - inputStart) / float32(1000.0)))
-	}
-
-	return result
-}
-
 func (b *UdpBody) ProcessInput(frameStart int64) {
 	for i := b.DequeueInput(); i != nil; {
 		if (i.GetType() == MOVE) {
 			data := i.GetContent()
 			dataLen := len(data)
 			accel := float32(0.0)
-			degrees := float32(0.0)
 			stats := b.controllingPlayer.GetStats()
-			remaining := dataLen
+			offset := 0
+			redundancy := data[0];
+			offset++;
+			//r := byte(0)
 
-			for j := 0; remaining > 0; j++ {
-				movementType, start, end := readInput(data, j)
-				remaining -= 17
+			currentSeq := i.GetSeq() - uint16(redundancy)
+			currentTime := helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+			currentXPos, currentYPos, currentXVel, currentYVel, currentAngle := b.history.GetTransformAt(currentTime)
+			var currentVel mgl32.Vec3
+			currentVel[0] = currentXVel
+			currentVel[1] = currentYVel
+			var act byte
+			var actDur int64
 
-				if movementType == LEFT {
-					//log.Printf("%d -- %d -- %d", frameStart, start, end);
-					degrees += applyStat(stats.Rotation, frameStart, start, end)
+			// Process this input msg
+			for offset < dataLen {//for currentTime < frameStart {
+				actCount := data[offset]
+				offset++
+
+				for a := byte(0); a < actCount; a++ {
+					act = data[offset]
+					offset++
+					actDur = snet.Read_int64(data[offset:offset+8])
+					offset += 8
+					if act == LEFT {
+						currentAngle += helpers.PerSecondOverTime(stats.Rotation, actDur)
+					}
+					if act == RIGHT {
+						currentAngle -= helpers.PerSecondOverTime(stats.Rotation, actDur)
+					}
+
+					currentAngle = helpers.WrappedAngle(currentAngle)
+
+					if act == FORWARD {
+						accel += helpers.PerSecondOverTime(stats.Thrust, actDur)
+					}
+					if act == BACKWARD {
+						accel -= helpers.PerSecondOverTime(stats.Thrust, actDur)
+					}
 				}
-				if movementType == RIGHT {
-					degrees -= applyStat(stats.Rotation, frameStart, start, end)
+
+				if accel != 0 {
+					//log.Printf("%d - %f", currentSeq, accel)
+					q := mgl32.AnglesToQuat(mgl32.DegToRad(currentAngle), 0, 0, mgl32.ZYX).Normalize()
+
+					// Apply force along the Y axis
+					accVec := mgl32.Vec3{0, accel, 0}
+					velVec := mgl32.Vec3{currentXVel, currentYVel, 0}
+
+					// Rotate & Add the acceleration vector to velocity
+					currentVel = velVec.Add(q.Rotate(accVec))
 				}
-				if movementType == FORWARD {
-					accel += applyStat(stats.Thrust, frameStart, start, end)
-				}
-				if movementType == BACKWARD {
-					accel -= applyStat(stats.Thrust, frameStart, start, end)
-				}
-			}
-
-			// clamp b.rot to 0 - 360
-      if degrees != 0 {
-        b.rot += int16(degrees);
-        if b.rot > 360 {
-          b.rot -= 360;
-        } else if b.rot < 0 {
-          b.rot += 360;
-        }
-      }
-
-      //log.Printf("%d", b.rot)
-
-			// TODO: apply rotation
-			if accel != 0 {
-				q := mgl32.AnglesToQuat(mgl32.DegToRad(float32(b.rot)), 0, 0, mgl32.ZYX).Normalize()
-
-				// Apply force along the Y axis
-				accVec := mgl32.Vec3{0, accel, 0}
-				velVec := mgl32.Vec3{b.xVel, b.yVel, 0}
-
-				// Rotate & Add the acceleration vector to velocity
-				newVel := velVec.Add(q.Rotate(accVec))
 
 				// Clamp velocity to max speed
-				if newVel.LenSqr() > (stats.MaxSpeed * stats.MaxSpeed) {
-					newVel = newVel.Normalize().Mul(stats.MaxSpeed)
+				if currentVel.LenSqr() > (stats.MaxSpeed * stats.MaxSpeed) {
+					currentVel = currentVel.Normalize().Mul(stats.MaxSpeed)
 				}
+
 				// Update velocity
-				b.SetVel(newVel[0], newVel[1])
+				currentXPos += currentVel[0]
+				currentYPos += currentVel[1]
+				currentXVel = currentVel[0]
+				currentYVel = currentVel[1]
+
+				accel = float32(0)
 
 				// detect and handle world collision
 
 				// detect and handle body collision
-					// get objects near this one
-					// add to list of object groups to check for collision
+				// get objects near this one
+				// add to list of object groups to check for collision
+				currentSeq++
+				currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+
+				var crumb HistoricalTransform
+				crumb.Timestamp = currentTime
+				crumb.Angle = currentAngle
+				crumb.XPos = currentXPos
+				crumb.YPos = currentYPos
+				crumb.XVel = currentXVel
+				crumb.YVel = currentYVel
+				b.history.Insert(crumb)
+			}
+
+			// apply changes to history
+			for currentTime <= frameStart {
+				// Update velocity
+				currentXPos += currentVel[0]
+				currentYPos += currentVel[1]
+
+				// collision check
+
+				var crumb HistoricalTransform
+				crumb.Timestamp = currentTime
+				crumb.Angle = currentAngle
+				crumb.XPos = currentXPos
+				crumb.YPos = currentYPos
+				crumb.XVel = currentXVel
+				crumb.YVel = currentYVel
+				b.history.Insert(crumb)
+
+				currentSeq++
+				currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+			}
+
+			if currentAngle != b.rot {
+				b.rot = currentAngle
+			}
+
+			bVelSqr := mgl32.Vec3{b.xVel, b.yVel,0}.LenSqr()
+			if currentVel.LenSqr() != bVelSqr {
+				b.SetVel(currentVel[0], currentVel[1])
 			}
 
 			i = b.DequeueInput()
@@ -194,10 +245,29 @@ func (b *UdpBody) ProcessInput(frameStart int64) {
 	}
 }
 
+func (b *UdpBody) AdvanceHistory(frameStart int64) {
+	crumb := b.GetHistoricalTransform()
+	crumb.Timestamp = frameStart
+	b.history.Advance(crumb)
+}
+
 // TODO: apply rotation?
 func (b *UdpBody) ApplyTransform() {
 	b.xPos = b.xPos + b.xVel
 	b.yPos = b.yPos + b.yVel
+}
+
+func (b *UdpBody) GetHistoricalTransform() HistoricalTransform {
+	var ht HistoricalTransform
+
+	ht.Timestamp = helpers.NowMillis()
+	ht.Angle = b.rot
+	ht.XPos = b.xPos
+	ht.YPos = b.yPos
+	ht.XVel = b.xVel
+	ht.YVel = b.yVel
+
+	return ht
 }
 
 // access / modify
@@ -231,11 +301,11 @@ func (b *UdpBody) GetId() uint16 {
 	return b.id
 }
 
-func (b *UdpBody) SetRot(r int16) {
+func (b *UdpBody) SetRot(r float32) {
 	b.rot = r
 }
 
-func (b *UdpBody) GetRot() int16 {
+func (b *UdpBody) GetRot() float32 {
 	return b.rot
 }
 
