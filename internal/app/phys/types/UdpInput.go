@@ -61,7 +61,9 @@ func (i *UdpInput) Deserialize (msg *NetworkMsg) {
 	// Input type: 1 byte
 	i.iType = UdpInputType(msg.Data[nameLength + 4])
 
-	i.content = msg.Data[nameLength + 5:]
+	var contentLen = len(msg.Data) - 5 - int(nameLength)
+	i.content = make([]byte, contentLen)
+	copy(i.content[:], msg.Data[nameLength + 5:])
 }
 
 func (i *UdpInput) String() string {
