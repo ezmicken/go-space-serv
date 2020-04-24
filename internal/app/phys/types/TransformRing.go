@@ -1,8 +1,6 @@
 package phys
 
 import (
-  "log"
-
   "go-space-serv/internal/app/helpers"
 )
 
