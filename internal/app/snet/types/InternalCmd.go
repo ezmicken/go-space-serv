@@ -5,7 +5,7 @@ package snet
 type InternalCmd byte
 
 const(
-	IReady InternalCmd = iota + 1
-	IJoin
-	ILeave
+  IReady InternalCmd = iota + 1
+  IJoin
+  ILeave
 )

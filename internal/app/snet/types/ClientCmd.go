@@ -5,6 +5,6 @@ package snet
 type ClientCmd byte
 
 const (
-	CPing ClientCmd = iota + 1
-	CPong
+  CPing ClientCmd = iota + 1
+  CPong
 )
