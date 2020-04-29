@@ -30,3 +30,8 @@ func NowMillis() int64 {
 func SeqToMillis(seq uint16, lastSync int64) int64 {
   return NanosToMillis(lastSync + (int64(seq) * GetConfiguredTimestepNanos()))
 }
+
+// doesnt always work
+func MillisToSeq(timestamp int64, lastSync int64) uint16 {
+  return (uint16)((lastSync - timestamp) / GetConfiguredTimestep() * -1);
+}
