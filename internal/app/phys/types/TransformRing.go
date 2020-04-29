@@ -7,14 +7,14 @@ import (
 type TransformRing struct {
   nextFree int
   buffer []HistoricalTransform
-  initialized bool
+  Initialized bool
 }
 
 func NewTransformRing(length int) *TransformRing {
   var r TransformRing
   r.nextFree = 0
   r.buffer = make([]HistoricalTransform, length)
-  r.initialized = false
+  r.Initialized = false
   return &r
 }
 
@@ -25,8 +25,8 @@ func (r *TransformRing) wrappedIndex(idx int) int {
   return idx;
 }
 
-func (r *TransformRing) initialize(ht HistoricalTransform) {
-  if r.initialized { return }
+func (r *TransformRing) Initialize(ht HistoricalTransform) {
+  if r.Initialized { return }
 
   current := r.wrappedIndex(r.nextFree - 1)
   currentTime := ht.Timestamp
@@ -39,16 +39,12 @@ func (r *TransformRing) initialize(ht HistoricalTransform) {
     currentTime -= timestep
   }
 
-  r.initialized = true
+  r.Initialized = true
 }
 
 func (r *TransformRing) Advance(ht HistoricalTransform) {
-  if (!r.initialized) {
-    r.initialize(ht)
-  } else {
-    r.buffer[r.nextFree] = ht
-    r.nextFree = r.wrappedIndex(r.nextFree + 1)
-  }
+  r.buffer[r.nextFree] = ht
+  r.nextFree = r.wrappedIndex(r.nextFree + 1)
 }
 
 func (r *TransformRing) Insert(ht HistoricalTransform) {
@@ -83,7 +79,7 @@ func (r *TransformRing) GetTransformAt(time int64) (xPos, yPos, xVel, yVel, angl
 
   for !found && k < l {
     i = r.wrappedIndex(i - 1);
-    found = r.buffer[i].Timestamp <= time && r.buffer[i].Timestamp != 0
+    found = r.buffer[i].Timestamp == time
     k++
   }
 
