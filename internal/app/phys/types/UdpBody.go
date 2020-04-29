@@ -3,7 +3,7 @@ package phys
 import (
   "encoding/binary"
   "bytes"
-  //"log"
+  "log"
 
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/helpers"
@@ -119,7 +119,13 @@ func readInput(data []byte, offset int) (byte, int64, int64) {
   return movementType, start, end
 }
 
-func (b *UdpBody) ProcessInput(frameStart int64) {
+func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
+  if !b.history.Initialized {
+    initHistory := b.GetHistoricalTransform()
+    initHistory.Timestamp = frameStart
+    b.history.Initialize(initHistory)
+  }
+
   for i := b.DequeueInput(); i != nil; {
     if (i.GetType() == MOVE) {
       data := i.GetContent()
@@ -133,7 +139,7 @@ func (b *UdpBody) ProcessInput(frameStart int64) {
 
       currentSeq := i.GetSeq() - uint16(redundancy)
       currentTime := helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
-      currentXPos, currentYPos, currentXVel, currentYVel, currentAngle := b.history.GetTransformAt(currentTime)
+      currentXPos, currentYPos, currentXVel, currentYVel, currentAngle := b.history.GetTransformAt(currentTime - helpers.GetConfiguredTimestep())
       var currentVel mgl32.Vec3
       currentVel[0] = currentXVel
       currentVel[1] = currentYVel
@@ -141,7 +147,7 @@ func (b *UdpBody) ProcessInput(frameStart int64) {
       var actDur int64
 
       // Process this input msg
-      for offset < dataLen {//for currentTime < frameStart {
+      for offset < dataLen && currentSeq < seq {//for currentTime < frameStart {
         actCount := data[offset]
         offset++
 
@@ -190,15 +196,7 @@ func (b *UdpBody) ProcessInput(frameStart int64) {
         currentXVel = currentVel[0]
         currentYVel = currentVel[1]
 
-        accel = float32(0)
-
-        // detect and handle world collision
-
-        // detect and handle body collision
-        // get objects near this one
-        // add to list of object groups to check for collision
-        currentSeq++
-        currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+        log.Printf("[%d] %d %f -> %f", currentTime, currentSeq, currentYPos, currentYVel)
 
         var crumb HistoricalTransform
         crumb.Timestamp = currentTime
@@ -208,10 +206,20 @@ func (b *UdpBody) ProcessInput(frameStart int64) {
         crumb.XVel = currentXVel
         crumb.YVel = currentYVel
         b.history.Insert(crumb)
+
+        accel = float32(0)
+
+        // detect and handle world collision
+
+        // detect and handle body collision
+        // get objects near this one
+        // add to list of object groups to check for collision
+        currentSeq++
+        currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
       }
 
       // apply changes to history
-      for currentTime <= frameStart {
+      for currentTime < frameStart {
         // Update velocity
         currentXPos += currentVel[0]
         currentYPos += currentVel[1]
@@ -231,30 +239,25 @@ func (b *UdpBody) ProcessInput(frameStart int64) {
         currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
       }
 
-      if currentAngle != b.rot {
-        b.rot = currentAngle
-      }
+      b.rot = currentAngle
 
-      bVelSqr := mgl32.Vec3{b.xVel, b.yVel,0}.LenSqr()
-      if currentVel.LenSqr() != bVelSqr {
-        b.SetVel(currentVel[0], currentVel[1])
-      }
+      b.SetVel(currentVel[0], currentVel[1])
 
       i = b.DequeueInput()
     }
   }
 }
 
-func (b *UdpBody) AdvanceHistory(frameStart int64) {
+// TODO: apply rotation?
+func (b *UdpBody) ApplyTransform(frameStart int64) {
+  b.xPos = b.xPos + b.xVel
+  b.yPos = b.yPos + b.yVel
+
+  log.Printf("[%d] %f - %f", frameStart, b.yPos, b.yVel)
+
   crumb := b.GetHistoricalTransform()
   crumb.Timestamp = frameStart
   b.history.Advance(crumb)
-}
-
-// TODO: apply rotation?
-func (b *UdpBody) ApplyTransform() {
-  b.xPos = b.xPos + b.xVel
-  b.yPos = b.yPos + b.yVel
 }
 
 func (b *UdpBody) GetHistoricalTransform() HistoricalTransform {

@@ -239,16 +239,14 @@ func (ps *physicsServer) Simulate(frameStart int64) {
       continue
     }
 
-    b.AdvanceHistory(frameStartMillis)
-
     player := b.GetControllingPlayer()
     if player != nil && player.IsActive() {
-      b.ProcessInput(frameStartMillis)
+      b.ProcessInput(ps.seq, frameStartMillis)
     } else {
       log.Printf("player is nil on controlled body %d", b.GetId());
     }
 
-    b.ApplyTransform()
+    b.ApplyTransform(frameStartMillis)
 
     frame.AddUdpBody(b)
   }
@@ -279,7 +277,7 @@ func (ps *physicsServer) Simulate(frameStart int64) {
 // Simulation loop
 // Determines when to process frames.
 // Initiates synchronization.
-// Processes input not related to bodies
+// Processes input not related to controlled bodies
 func (ps *physicsServer) Simulation() {
   simulationStart := time.Now().UnixNano()
   ps.lastSync = simulationStart
