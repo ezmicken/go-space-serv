@@ -135,7 +135,6 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
       offset := 0
       redundancy := data[0];
       offset++;
-      //r := byte(0)
 
       currentSeq := i.GetSeq() - uint16(redundancy)
       currentTime := helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
@@ -147,7 +146,7 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
       var actDur int64
 
       // Process this input msg
-      for offset < dataLen && currentSeq < seq {//for currentTime < frameStart {
+      for offset < dataLen && currentSeq < seq {
         actCount := data[offset]
         offset++
 
@@ -174,7 +173,6 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
         }
 
         if accel != 0 {
-          //log.Printf("%d - %f", currentSeq, accel)
           q := mgl32.AnglesToQuat(mgl32.DegToRad(currentAngle), 0, 0, mgl32.ZYX).Normalize()
 
           // Apply force along the Y axis
@@ -195,8 +193,6 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
         currentYPos += currentVel[1]
         currentXVel = currentVel[0]
         currentYVel = currentVel[1]
-
-        log.Printf("[%d] %d %f -> %f", currentTime, currentSeq, currentYPos, currentYVel)
 
         var crumb HistoricalTransform
         crumb.Timestamp = currentTime
@@ -252,8 +248,6 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
 func (b *UdpBody) ApplyTransform(frameStart int64) {
   b.xPos = b.xPos + b.xVel
   b.yPos = b.yPos + b.yVel
-
-  log.Printf("[%d] %f - %f", frameStart, b.yPos, b.yVel)
 
   crumb := b.GetHistoricalTransform()
   crumb.Timestamp = frameStart
