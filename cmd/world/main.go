@@ -193,7 +193,8 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
             response := snet.GetDataFromNetworkMsg(responseMsg)
             if response != nil {
               log.Printf("[%s] React <- %d", c.RemoteAddr().String(), responseMsg.Size)
-              c.AsyncWrite(response)
+              c.AsyncWrite(responseMsg.SizeBytes())
+              c.AsyncWrite(responseMsg.Data)
             }
           }
         }
@@ -214,9 +215,9 @@ func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
       numMsgs := ctx.NumMsgs()
       if numMsgs > 0 {
         netMsg := ctx.GetMsg();
-        msgBytes := snet.GetDataFromNetworkMsg(netMsg);
         log.Printf("[%s] Tick <- %d", addr, netMsg.Size)
-        c.AsyncWrite(msgBytes)
+        c.AsyncWrite(netMsg.SizeBytes())
+        c.AsyncWrite(netMsg.Data)
       }
       return true
     })

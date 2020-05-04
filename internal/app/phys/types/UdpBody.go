@@ -3,7 +3,7 @@ package phys
 import (
   "encoding/binary"
   "bytes"
-  "log"
+  //"log"
 
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/helpers"

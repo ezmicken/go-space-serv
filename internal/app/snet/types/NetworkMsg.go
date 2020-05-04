@@ -1,6 +1,8 @@
 package snet
 
 import(
+  "log"
+  "bytes"
   "encoding/binary"
 )
 
@@ -14,6 +16,16 @@ func initData(msg *NetworkMsg) {
     msg.Data = []byte{}
     msg.Size = 0
   }
+}
+
+func (msg *NetworkMsg) SizeBytes() []byte {
+  sizeBuf := new(bytes.Buffer)
+  err := binary.Write(sizeBuf, binary.LittleEndian, uint16(msg.Size))
+  if err != nil {
+    log.Printf("Unable to convert msg size to byte. err = %s", err)
+    return nil
+  }
+  return sizeBuf.Bytes()
 }
 
 func (msg *NetworkMsg) PutByte(val byte) {
