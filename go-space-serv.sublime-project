@@ -1,0 +1,24 @@
+{
+  "folders":
+  [
+    {
+      "folder_exclude_patterns": [ ".vs", "obj" ],
+      "file_exclude_patterns": [ "*.meta" ],
+      "follow_symlinks": true,
+      "path": "."
+    }
+  ],
+  "tab_completion": false,
+  "tab_size": 2,
+  "theme": "Adaptive.sublime-theme",
+  "translate_tabs_to_spaces": true,
+  "trim_trailing_white_space_on_save": true,
+  "use_tab_stops": true,
+  "detect_indentation": false,
+  "ensure_newline_at_eof_on_save": true,
+  "indent_to_bracket": true,
+  "default_line_ending": "unix",
+  "show_encoding": true,
+  "show_line_endings": true,
+  "word_wrap": false
+}
