@@ -100,9 +100,8 @@ func (ps *physicsServer) spawnPlayer(in UdpInput) {
   msg.PutUint16(pBod.GetId())
   msg.PutUint32(spawnX)
   msg.PutUint32(spawnY)
+  p.AddMsg(&msg)
 
-  conn := p.GetConnection()
-  conn.SendTo(snet.GetDataFromNetworkMsg(&msg));
   log.Printf("Spawning %s at %d/%d -- %f/%f", p.GetName(), spawnX, spawnY, x, y)
 }
 
@@ -133,18 +132,14 @@ func (ps *physicsServer) SyncPlayers(syncTime int64) {
   syncMsg.PutUint16(ps.seq)
   syncMsg.PutUint64(uint64(syncTime  / (int64(time.Millisecond)/int64(time.Nanosecond))))
 
-  syncMsgData := snet.GetDataFromNetworkMsg(&syncMsg)
-
   ps.lastSync = syncTime
 
   ps.connectedPlayers.Range(func(key, value interface{}) bool {
-    // TODO: customize frame for each player
     p := value.(*UdpPlayer)
-
 
     if p.IsActive() {
       p.Sync(syncTime)
-      p.GetConnection().SendTo(syncMsgData)
+      p.AddMsg(&syncMsg)
       log.Printf("Synced %s", p.GetName())
     }
 
@@ -161,7 +156,7 @@ func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
 
   if p.IsActive() {
     p.Sync(syncTime)
-    p.GetConnection().SendTo(snet.GetDataFromNetworkMsg(&syncMsg))
+    p.AddMsg(&syncMsg)
     log.Printf("Synced %s", p.GetName())
   }
 }
@@ -247,7 +242,6 @@ func (ps *physicsServer) Simulate(frameStart int64) {
     }
 
     b.ApplyTransform(frameStartMillis)
-
     frame.AddUdpBody(b)
   }
   ps.bodies = filteredBodies
@@ -259,15 +253,13 @@ func (ps *physicsServer) Simulate(frameStart int64) {
     frameMsg.PutByte(byte(SFrame))
     frameMsg.PutUint16(ps.seq)
     frameMsg.PutBytes(serializedFrame)
-    frameData := snet.GetDataFromNetworkMsg(&frameMsg)
 
     // Send the frame to relevent players.
     ps.connectedPlayers.Range(func(key, value interface{}) bool {
       // TODO: customize frame for each player
       p := value.(*UdpPlayer)
       if p.IsActive() {
-        conn := p.GetConnection()
-        conn.SendTo(frameData)
+        p.AddMsg(&frameMsg)
       }
       return true
     })
@@ -296,7 +288,7 @@ func (ps *physicsServer) Simulation() {
         ps.Simulate(ps.lastFrame)
 
         if ps.seq == 0 {
-          shouldSync = true;
+          shouldSync = true
           ps.seq = 1
         }
       }
@@ -327,6 +319,24 @@ func (ps *physicsServer) Simulation() {
     } else {
       time.Sleep(32)
     }
+  }
+}
+
+func (ps *physicsServer) Output() {
+  for {
+    ps.connectedPlayers.Range(func(key, value interface{}) bool {
+      // TODO: customize frame for each player
+      p := value.(*UdpPlayer)
+      if p.IsActive() {
+      	msg := p.GetMsg()
+        if msg != nil {
+          p.GetConnection().SendTo(snet.GetDataFromNetworkMsg(msg))
+        }
+      }
+      return true
+    })
+
+    time.Sleep(32)
   }
 }
 
@@ -372,6 +382,7 @@ func main() {
   // react to events from world server
   go ps.ReactWorld(conn)
   go ps.Simulation()
+  go ps.Output()
 
   log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
 }

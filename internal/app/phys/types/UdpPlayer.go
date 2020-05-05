@@ -2,8 +2,10 @@ package phys
 
 import(
   "github.com/panjf2000/gnet"
+  "log"
 
   ."go-space-serv/internal/app/player/types"
+  ."go-space-serv/internal/app/snet/types"
 )
 type UdpPlayerState byte
 
@@ -18,6 +20,7 @@ type UdpPlayer struct {
   active bool
   lastSync int64
   connection gnet.Conn
+  messages chan *NetworkMsg
   state UdpPlayerState
   stats *PlayerStats
 }
@@ -28,7 +31,27 @@ func NewUdpPlayer(n string) *UdpPlayer{
   p.active = false
   p.state = CONNECTED
   p.lastSync = 0
+  p.messages = make(chan *NetworkMsg, 100)
   return &p
+}
+
+func (p *UdpPlayer) AddMsg(msg *NetworkMsg) {
+	select {
+		case p.messages <- msg:
+		default:
+			log.Printf("%s msg queue full. Discarding...", p.name)
+	}
+}
+
+func (p *UdpPlayer) GetMsg() *NetworkMsg {
+	var msg *NetworkMsg
+	select {
+		case msg = <- p.messages:
+		default:
+			msg = nil
+	}
+
+	return msg
 }
 
 func (p *UdpPlayer) GetName() string {
