@@ -12,11 +12,16 @@ func PerSecondOverTime(stat float32, dur ...int64) float32 {
   }
 }
 
-func WrappedAngle(angle float32) float32 {
-  for angle > 360 { angle -= 360 }
-  for angle < 0 { angle += 360 }
+func WrapFloat32(val, min, length float32) float32 {
+  for val >= length { val -= length }
+  for val < min { val += length }
+  return val;
+}
 
-  return angle
+func WrapInt(val, min, length int) int {
+  for val >= length { val -= length }
+  for val < min { val += length }
+  return val;
 }
 
 func NanosToMillis(nanos int64) int64 {

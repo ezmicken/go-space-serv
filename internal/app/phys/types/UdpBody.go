@@ -162,7 +162,7 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
             currentAngle -= helpers.PerSecondOverTime(stats.Rotation, actDur)
           }
 
-          currentAngle = helpers.WrappedAngle(currentAngle)
+          currentAngle = helpers.WrapFloat32(currentAngle, 0, 360)
 
           if act == FORWARD {
             accel += helpers.PerSecondOverTime(stats.Thrust, actDur)
