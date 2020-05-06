@@ -16,6 +16,7 @@ import (
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/helpers"
   "go-space-serv/internal/app/world"
+  "go-space-serv/internal/app/player"
 
   . "go-space-serv/internal/app/player/types"
   . "go-space-serv/internal/app/phys/types"
@@ -36,9 +37,9 @@ type physicsServer struct {
   *gnet.EventServer
   pool              *goroutine.Pool
 
+  players             player.Players
+
   // Simulation data
-  playerCount         int         // count of connectedPlayers
-  connectedPlayers    sync.Map    // player id <-> UdpPlayer
   controlMap          sync.Map    // player id <-> UdpBody
   inputs              *priorityqueue.HierarchicalQueue // Inputs that are not part of the simulation
   bodies              []*UdpBody
@@ -77,53 +78,35 @@ const spawnY      int     = 500
 
 func (ps *physicsServer) spawnPlayer(in UdpInput) {
   playerName := in.GetName();
-  player, ok := ps.connectedPlayers.Load(in.GetName())
-  p := player.(*UdpPlayer)
-  if !ok {
+  player := ps.players.GetPlayer(playerName)
+
+  if player != nil {
+    if player.GetState() != SPECTATING {
+      log.Printf("player %s spawn when not spectating", playerName)
+      return
+    }
+
+    // OK, add body to simulation
+    x, y := ps.worldMap.GetCellCenter(spawnX, spawnY)
+    pBod := NewControlledUdpBody(player)
+    pBod.SetPos(x, y)
+    ps.bodies = append(ps.bodies, pBod)
+
+    // Map body <-> player for easier input assignment
+    ps.controlMap.Store(playerName, pBod)
+
+    // Tell client where to spawn
+    var msg NetworkMsg
+    msg.PutByte(byte(SSpawn))
+    msg.PutUint16(pBod.GetId())
+    msg.PutUint32(spawnX)
+    msg.PutUint32(spawnY)
+    ps.players.QueueMsgAll(&msg)
+
+    log.Printf("Spawning %s at %d/%d -- %f/%f", player.GetName(), spawnX, spawnY, x, y)
+  } else {
     log.Printf("unable to find connected player %s", playerName)
-  } else if p.GetState() != SPECTATING {
-    log.Printf("player %s spawn when not spectating", playerName)
   }
-
-  // OK, add body to simulation
-  x, y := ps.worldMap.GetCellCenter(spawnX, spawnY)
-  pBod := NewControlledUdpBody(p)
-  pBod.SetPos(x, y)
-  ps.bodies = append(ps.bodies, pBod)
-
-  // Map body <-> player for easier input assignment
-  ps.controlMap.Store(playerName, pBod)
-
-  // Tell client where to spawn
-  var msg NetworkMsg
-  msg.PutByte(byte(SSpawn))
-  msg.PutUint16(pBod.GetId())
-  msg.PutUint32(spawnX)
-  msg.PutUint32(spawnY)
-  p.AddMsg(&msg)
-
-  log.Printf("Spawning %s at %d/%d -- %f/%f", p.GetName(), spawnX, spawnY, x, y)
-}
-
-func (ps *physicsServer) NewPlayer(id string) {
-  player := NewUdpPlayer(id)
-  player.SetStats(NewPlayerStats())
-
-  _, exists := ps.connectedPlayers.LoadOrStore(id, player)
-  if !exists {
-    ps.playerCount += 1
-    log.Printf("%s joined the simulation", id)
-  }
-}
-
-func (ps *physicsServer) RemovePlayer(id string) {
-  pBody, ok := ps.controlMap.Load(id)
-  if ok {
-    pBody.(*UdpBody).Kill()
-  }
-  ps.controlMap.Delete(id)
-  ps.connectedPlayers.Delete(id)
-  log.Printf("%s left the simulation", id)
 }
 
 func (ps *physicsServer) SyncPlayers(syncTime int64) {
@@ -134,17 +117,7 @@ func (ps *physicsServer) SyncPlayers(syncTime int64) {
 
   ps.lastSync = syncTime
 
-  ps.connectedPlayers.Range(func(key, value interface{}) bool {
-    p := value.(*UdpPlayer)
-
-    if p.IsActive() {
-      p.Sync(syncTime)
-      p.AddMsg(&syncMsg)
-      log.Printf("Synced %s", p.GetName())
-    }
-
-    return true
-  })
+  ps.players.SyncPlayers(syncTime, &syncMsg)
 }
 
 func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
@@ -161,18 +134,13 @@ func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
   }
 }
 
-// Event Loop
-/////////////////
-
 func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
   playerName := i.GetName()
-  p, ok := ps.connectedPlayers.Load(playerName)
-  if !ok {
-    log.Printf("Attempting to interpret command from unknown player %s", playerName)
-  } else {
-    player := p.(*UdpPlayer)
+  player := ps.players.GetPlayer(playerName)
+
+  if player != nil {
     // TODO: authenticate
-    if i.GetType() == HELLO && !player.IsActive(){
+    if i.GetType() == HELLO && !player.IsActive() {
       log.Printf("%s connected.", playerName)
       player.Activate()
       player.SetState(SPECTATING)
@@ -255,14 +223,7 @@ func (ps *physicsServer) Simulate(frameStart int64) {
     frameMsg.PutBytes(serializedFrame)
 
     // Send the frame to relevent players.
-    ps.connectedPlayers.Range(func(key, value interface{}) bool {
-      // TODO: customize frame for each player
-      p := value.(*UdpPlayer)
-      if p.IsActive() {
-        p.AddMsg(&frameMsg)
-      }
-      return true
-    })
+    ps.players.QueueMsgAll(&frameMsg)
   }
 }
 
@@ -292,7 +253,7 @@ func (ps *physicsServer) Simulation() {
           ps.seq = 1
         }
       }
-    } else if shouldSync && ps.playerCount > 0 {
+    } else if shouldSync && ps.players.Count > 0 {
       log.Printf("SYNC")
       ps.SyncPlayers(ps.lastFrame)
       shouldSync = false;
@@ -324,18 +285,7 @@ func (ps *physicsServer) Simulation() {
 
 func (ps *physicsServer) Output() {
   for {
-    ps.connectedPlayers.Range(func(key, value interface{}) bool {
-      // TODO: customize frame for each player
-      p := value.(*UdpPlayer)
-      if p.IsActive() {
-      	msg := p.GetMsg()
-        if msg != nil {
-          p.GetConnection().SendTo(snet.GetDataFromNetworkMsg(msg))
-        }
-      }
-      return true
-    })
-
+    ps.players.SendQueuedMsgs()
     time.Sleep(32)
   }
 }
@@ -381,7 +331,11 @@ func main() {
 
   // react to events from world server
   go ps.ReactWorld(conn)
+
+  // run the simulation loop
   go ps.Simulation()
+
+  // consume queue of outgoing messages
   go ps.Output()
 
   log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
@@ -488,12 +442,18 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
               playerIdLenBytes := eventContent[1:3]
               playerIdLen := snet.Read_uint16(playerIdLenBytes)
               playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
-              ps.NewPlayer(playerId)
+              ps.players.Add(playerId, NewPlayerStats())
             } else if eventContent[0] == byte(ILeave) {
               playerIdLenBytes := eventContent[1:3]
               playerIdLen := snet.Read_uint16(playerIdLenBytes)
               playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
-              ps.RemovePlayer(playerId)
+              ps.players.Remove(playerId)
+
+              pBody, ok := ps.controlMap.Load(playerId)
+              if ok {
+                pBody.(*UdpBody).Kill()
+                ps.controlMap.Delete(playerId)
+              }
             }
           }
           reader.Discard(eventSize)
