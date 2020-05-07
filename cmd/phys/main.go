@@ -2,7 +2,6 @@ package main
 
 import (
   "log"
-  "sync"
   "time"
   "net"
   "bufio"
@@ -11,12 +10,12 @@ import (
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
-  "github.com/bgadrian/data-structures/priorityqueue"
 
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/helpers"
   "go-space-serv/internal/app/world"
   "go-space-serv/internal/app/player"
+  "go-space-serv/internal/app/phys"
 
   . "go-space-serv/internal/app/player/types"
   . "go-space-serv/internal/app/phys/types"
@@ -35,21 +34,12 @@ import (
 
 type physicsServer struct {
   *gnet.EventServer
-  pool              *goroutine.Pool
+  pool                *goroutine.Pool
 
   players             player.Players
+  sim                 phys.Simulation
 
-  // Simulation data
-  controlMap          sync.Map    // player id <-> UdpBody
-  inputs              *priorityqueue.HierarchicalQueue // Inputs that are not part of the simulation
-  bodies              []*UdpBody
-
-  // Timing
-  seq                 uint16        // incremented each simulation frame, sync when rolls over
-  launchTime          int64         // unix nanos when the program started
-  lastSync            int64         // unix nanos the last time sync was performed
-  lastFrame           int64         // unix nanos since the last simulation frame
-  framesSinceLastSync int64         // simulation frames since last sync
+  launchTime          int64
   tick                time.Duration // loop speed
 
   // World map data
@@ -68,227 +58,6 @@ const cmdLen      int     = 1
 const maxMsgSize  int     = 1500
 const udpAddr     string  = "udp://:9495";
 const udpPort     int     = 9495
-
-// map constants
-const spawnX      int     = 500
-const spawnY      int     = 500
-
-// Actions
-/////////////
-
-func (ps *physicsServer) spawnPlayer(in UdpInput) {
-  playerName := in.GetName();
-  player := ps.players.GetPlayer(playerName)
-
-  if player != nil {
-    if player.GetState() != SPECTATING {
-      log.Printf("player %s spawn when not spectating", playerName)
-      return
-    }
-
-    // OK, add body to simulation
-    x, y := ps.worldMap.GetCellCenter(spawnX, spawnY)
-    pBod := NewControlledUdpBody(player)
-    pBod.SetPos(x, y)
-    ps.bodies = append(ps.bodies, pBod)
-
-    // Map body <-> player for easier input assignment
-    ps.controlMap.Store(playerName, pBod)
-
-    // Tell client where to spawn
-    var msg NetworkMsg
-    msg.PutByte(byte(SSpawn))
-    msg.PutUint16(pBod.GetId())
-    msg.PutUint32(spawnX)
-    msg.PutUint32(spawnY)
-    ps.players.QueueMsgAll(&msg)
-
-    log.Printf("Spawning %s at %d/%d -- %f/%f", player.GetName(), spawnX, spawnY, x, y)
-  } else {
-    log.Printf("unable to find connected player %s", playerName)
-  }
-}
-
-func (ps *physicsServer) SyncPlayers(syncTime int64) {
-  var syncMsg NetworkMsg
-  syncMsg.PutByte(byte(SSync))
-  syncMsg.PutUint16(ps.seq)
-  syncMsg.PutUint64(uint64(syncTime  / (int64(time.Millisecond)/int64(time.Nanosecond))))
-
-  ps.lastSync = syncTime
-
-  ps.players.SyncPlayers(syncTime, &syncMsg)
-}
-
-func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
-  log.Printf("Syncing %s", p.GetName())
-  var syncMsg NetworkMsg
-  syncMsg.PutByte(byte(SSync))
-  syncMsg.PutUint16(ps.seq)
-  syncMsg.PutUint64(uint64(helpers.NanosToMillis(syncTime)))
-
-  if p.IsActive() {
-    p.Sync(syncTime)
-    p.AddMsg(&syncMsg)
-    log.Printf("Synced %s", p.GetName())
-  }
-}
-
-func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
-  playerName := i.GetName()
-  player := ps.players.GetPlayer(playerName)
-
-  if player != nil {
-    // TODO: authenticate
-    if i.GetType() == HELLO && !player.IsActive() {
-      log.Printf("%s connected.", playerName)
-      player.Activate()
-      player.SetState(SPECTATING)
-      player.SetConnection(c)
-      ps.SyncPlayer(player, ps.lastSync)
-    }
-
-    // If the player is controlling a body
-    // add the input to the body.
-    bod, ok := ps.controlMap.Load(playerName)
-    if ok && bod != nil {
-      bod.(*UdpBody).QueueInput(&i)
-    } else {
-      ps.inputs.Enqueue(i, uint8(ps.seq))
-    }
-  }
-
-  return
-}
-
-func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-  _ = ps.pool.Submit(func() {
-    if len(data) >= 4 {
-      msg := snet.GetNetworkMsgFromData(data)
-      if msg != nil {
-        var i UdpInput
-        i.Deserialize(msg)
-
-        out = ps.interpret(i, c);
-      }
-    }
-  })
-
-  return
-}
-
-func (ps *physicsServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-  log.Printf("UDP server is listening on %s (multi-cores: %t, loops: %d)\n",
-    srv.Addr.String(), srv.Multicore, srv.NumLoops)
-  return
-}
-
-// Process physics for one frame
-func (ps *physicsServer) Simulate(frameStart int64) {
-  // initialize the frame
-  frame := NewUdpFrame(ps.seq)
-  frameStartMillis := helpers.NanosToMillis(frameStart)
-
-  // Update all bodies
-  // flag dead bodies for removal
-  // process live bodies
-  // replace ps.bodies with filtered list
-  filteredBodies := ps.bodies[:0]
-  for i, b := range ps.bodies {
-    if !b.IsDead() {
-      filteredBodies = append(filteredBodies, b)
-    } else {
-      ps.bodies[i] = nil
-      continue
-    }
-
-    player := b.GetControllingPlayer()
-    if player != nil && player.IsActive() {
-      b.ProcessInput(ps.seq, frameStartMillis)
-    } else {
-      log.Printf("player is nil on controlled body %d", b.GetId());
-    }
-
-    b.ApplyTransform(frameStartMillis)
-    frame.AddUdpBody(b)
-  }
-  ps.bodies = filteredBodies
-
-  // propagate input to clients
-  if frame.Len() > 0 {
-    serializedFrame := frame.Serialize()
-    var frameMsg NetworkMsg
-    frameMsg.PutByte(byte(SFrame))
-    frameMsg.PutUint16(ps.seq)
-    frameMsg.PutBytes(serializedFrame)
-
-    // Send the frame to relevent players.
-    ps.players.QueueMsgAll(&frameMsg)
-  }
-}
-
-// Simulation loop
-// Determines when to process frames.
-// Initiates synchronization.
-// Processes input not related to controlled bodies
-func (ps *physicsServer) Simulation() {
-  simulationStart := time.Now().UnixNano()
-  ps.lastSync = simulationStart
-  ps.seq = 0
-  shouldSync := false
-  timestepNano := helpers.GetConfiguredTimestepNanos()
-
-  for {
-    frameStartTime := time.Now()
-    frameStart := frameStartTime.UnixNano()
-    framesToProcess := ((frameStart - ps.lastSync) / timestepNano) - int64(ps.seq)
-    if framesToProcess > 0 {
-      for i := int64(0); i < framesToProcess; i++ {
-        ps.seq++;
-        ps.lastFrame = ps.lastSync + (int64(ps.seq) * timestepNano)
-        ps.Simulate(ps.lastFrame)
-
-        if ps.seq == 0 {
-          shouldSync = true
-          ps.seq = 1
-        }
-      }
-    } else if shouldSync && ps.players.Count > 0 {
-      log.Printf("SYNC")
-      ps.SyncPlayers(ps.lastFrame)
-      shouldSync = false;
-    } else {
-      nonBodyInputs := ps.inputs.Len()
-      for i := 0; i < nonBodyInputs; i++ {
-        in, err := ps.inputs.Dequeue()
-        if err != nil {
-          log.Printf(err.Error())
-          break
-        }
-
-        inp := in.(UdpInput)
-
-        if err == nil && inp.GetType() == SPAWN {
-          ps.spawnPlayer(inp)
-        }
-      }
-    }
-
-    elapsed := time.Since(frameStartTime);
-    if ps.tick > elapsed {
-      time.Sleep(ps.tick - elapsed)
-    } else {
-      time.Sleep(32)
-    }
-  }
-}
-
-func (ps *physicsServer) Output() {
-  for {
-    ps.players.SendQueuedMsgs()
-    time.Sleep(32)
-  }
-}
 
 func main() {
   p := goroutine.Default()
@@ -318,27 +87,98 @@ func main() {
   // Initialize UDP server
   ps := &physicsServer{
     pool: p,
-    bodies: []*UdpBody{},
     tick: 8333333,
-    seq: 0,
     launchTime: time.Now().UnixNano(),
-    lastSync: 0,
-    framesSinceLastSync: 0,
-    lastFrame: 0,
-    inputs: priorityqueue.NewHierarchicalQueue(255, true),
     worldConn: conn,
   }
 
   // react to events from world server
   go ps.ReactWorld(conn)
 
-  // run the simulation loop
-  go ps.Simulation()
+  // propagate sim output to all players
+  go ps.SimToPlayers()
 
-  // consume queue of outgoing messages
+  // consume queue of outgoing messages to all clients.
   go ps.Output()
 
   log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
+}
+
+func (ps *physicsServer) Output() {
+  for {
+    ps.players.SendQueuedMsgs()
+    time.Sleep(32)
+  }
+}
+
+func (ps *physicsServer) SimToPlayers() {
+  for {
+    ps.players.QueueMsgAll(ps.sim.Pull())
+    time.Sleep(32)
+  }
+}
+
+func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
+  log.Printf("Syncing %s", p.GetName())
+  var syncMsg NetworkMsg
+  syncMsg.PutByte(byte(SSync))
+  syncMsg.PutUint16(ps.sim.GetSeq())
+  syncMsg.PutUint64(uint64(helpers.NanosToMillis(syncTime)))
+
+  if p.IsActive() {
+    p.Sync(syncTime)
+    p.AddMsg(&syncMsg)
+    log.Printf("Synced %s", p.GetName())
+  }
+}
+
+func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
+  playerName := i.GetName()
+  player := ps.players.GetPlayer(playerName)
+
+  if player != nil {
+    // TODO: authenticate
+    if i.GetType() == HELLO && !player.IsActive() {
+      log.Printf("%s connected.", playerName)
+      player.Activate()
+      player.SetState(SPECTATING)
+      player.SetConnection(c)
+      ps.SyncPlayer(player, ps.sim.GetLastSync())
+    }
+
+    switch cmd := i.GetType(); cmd {
+      case MOVE:
+        ps.sim.AddMove(&i)
+      case SPAWN:
+        player := ps.players.GetPlayer(i.GetName())
+        if player != nil {
+          ps.sim.SpawnPlayer(&i, player)
+        }
+    }
+  }
+
+  return
+}
+
+func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+  _ = ps.pool.Submit(func() {
+    if len(data) >= 4 {
+      msg := snet.GetNetworkMsgFromData(data)
+      if msg != nil {
+        var i UdpInput
+        i.Deserialize(msg)
+        ps.interpret(i, c)
+      }
+    }
+  })
+
+  return
+}
+
+func (ps *physicsServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
+  log.Printf("UDP server is listening on %s (multi-cores: %t, loops: %d)\n",
+    srv.Addr.String(), srv.Multicore, srv.NumLoops)
+  return
 }
 
 // world server <-> physics server interaction
@@ -419,6 +259,7 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
 
         if mapBufRead == size - 4 - 4 - 1 {
           ps.worldMap.Deserialize(mapBuf, false)
+
           reader.Reset(c)
 
           state = readingEvent
@@ -428,6 +269,8 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
           msg.PutByte(byte(IReady))
           msg.PutUint32(udpPort)
           c.Write(snet.GetDataFromNetworkMsg(&msg))
+
+          ps.sim.Start(&ps.worldMap);
         }
       case readingEvent:
         eventSizeBytes, err := reader.Peek(4)
@@ -448,12 +291,7 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
               playerIdLen := snet.Read_uint16(playerIdLenBytes)
               playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
               ps.players.Remove(playerId)
-
-              pBody, ok := ps.controlMap.Load(playerId)
-              if ok {
-                pBody.(*UdpBody).Kill()
-                ps.controlMap.Delete(playerId)
-              }
+              ps.sim.RemoveControlledBody(playerId)
             }
           }
           reader.Discard(eventSize)
