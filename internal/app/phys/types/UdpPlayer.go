@@ -20,7 +20,7 @@ type UdpPlayer struct {
   active bool
   lastSync int64
   connection gnet.Conn
-  messages chan *NetworkMsg
+  output chan *NetworkMsg
   state UdpPlayerState
   stats *PlayerStats
 }
@@ -31,13 +31,13 @@ func NewUdpPlayer(n string) *UdpPlayer{
   p.active = false
   p.state = CONNECTED
   p.lastSync = 0
-  p.messages = make(chan *NetworkMsg, 100)
+  p.output = make(chan *NetworkMsg, 100)
   return &p
 }
 
 func (p *UdpPlayer) AddMsg(msg *NetworkMsg) {
 	select {
-		case p.messages <- msg:
+		case p.output <- msg:
 		default:
 			log.Printf("%s msg queue full. Discarding...", p.name)
 	}
@@ -46,7 +46,7 @@ func (p *UdpPlayer) AddMsg(msg *NetworkMsg) {
 func (p *UdpPlayer) GetMsg() *NetworkMsg {
 	var msg *NetworkMsg
 	select {
-		case msg = <- p.messages:
+		case msg = <- p.output:
 		default:
 			msg = nil
 	}

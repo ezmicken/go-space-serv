@@ -28,13 +28,8 @@ func (p *Players) Add(id string, stats *PlayerStats) {
 }
 
 func (p *Players) Remove(id string) {
-  pBody, ok := p.bodyMap.Load(id)
-  if ok {
-    pBody.(*UdpBody).Kill()
-  }
-
-  p.bodyMap.Delete(id)
   p.playerMap.Delete(id)
+  log.Printf("%s left the simulation", id)
 }
 
 func (p *Players) GetPlayer(id string) *UdpPlayer {
@@ -59,13 +54,15 @@ func (p *Players) SyncPlayers(time int64, msg *NetworkMsg) {
 }
 
 func (p *Players) QueueMsgAll(msg *NetworkMsg) {
-  p.playerMap.Range(func(key, value interface{}) bool {
-    player := value.(*UdpPlayer)
-    if player.IsActive() {
-    	player.AddMsg(msg)
-    }
-    return true
-  })
+	if msg != nil {
+	  p.playerMap.Range(func(key, value interface{}) bool {
+	    player := value.(*UdpPlayer)
+	    if player.IsActive() {
+	    	player.AddMsg(msg)
+	    }
+	    return true
+	  })
+	}
 }
 
 func (p *Players) SendQueuedMsgs() {
