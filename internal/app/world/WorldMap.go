@@ -16,6 +16,8 @@ type WorldMap struct {
   H int
   Seed int64
   Resolution int
+  SpawnX int
+  SpawnY int
 
   blocks [][]BlockType
 }
