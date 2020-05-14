@@ -3,6 +3,7 @@ package snet
 import(
   "log"
   "bytes"
+  "math"
   "encoding/binary"
 )
 
@@ -66,7 +67,17 @@ func (msg *NetworkMsg) PutUint64(val uint64) {
   var valBytes = make([]byte, 8)
   binary.LittleEndian.PutUint64(valBytes, val)
 
-  msg.Size += 8;
+  msg.Size += 8
+  msg.Data = append(msg.Data, valBytes...)
+}
+
+func (msg *NetworkMsg) PutFloat32(val float32) {
+  initData(msg)
+
+  valBytes := make([]byte, 4)
+  binary.LittleEndian.PutUint32(valBytes, math.Float32bits(val))
+
+  msg.Size += 4
   msg.Data = append(msg.Data, valBytes...)
 }
 
