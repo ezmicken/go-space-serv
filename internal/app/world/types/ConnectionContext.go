@@ -6,6 +6,7 @@ import (
   "container/list"
 
   . "go-space-serv/internal/app/snet/types"
+  . "go-space-serv/internal/app/player/types"
   "log"
 )
 
@@ -13,6 +14,7 @@ type ConnectionContext struct {
   explored polyclip.Polygon
   msgQueue *list.List
   playerId string
+  stats *PlayerStats
 }
 
 var sid *shortid.Shortid
@@ -35,6 +37,8 @@ func (ctx *ConnectionContext) Init() {
 
   ctx.playerId = id
   log.Printf("generated playerId: %s", id)
+
+  ctx.stats = NewPlayerStats(); // TODO: get this from db
 }
 
 func (ctx *ConnectionContext) NumMsgs() int {
@@ -61,6 +65,10 @@ func (ctx *ConnectionContext) AddMsg(m *NetworkMsg) {
 
 func (ctx *ConnectionContext) GetPlayerId() string {
   return ctx.playerId
+}
+
+func (ctx *ConnectionContext) GetPlayerStats() *PlayerStats {
+  return ctx.stats;
 }
 
 func (ctx *ConnectionContext) InitExploredPoly(xMin, xMax, yMin, yMax float64) {
