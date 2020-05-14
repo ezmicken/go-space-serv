@@ -47,9 +47,61 @@ var spawnX int = 500;
 var spawnY int = 500;
 var viewSize = 50; // todo: make this a player stat
 
+func (ws *worldServer) propagateMsg(playerId string, msg *NetworkMsg) {
+  ws.connectedSockets.Range(func(key, value interface{}) bool {
+    c := value.(gnet.Conn)
+    ctx := c.Context().(ConnectionContext)
+
+    if ctx.GetPlayerId() != playerId {
+      ctx.AddMsg(msg);
+    }
+
+    return true
+  })
+}
+
 func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   var ctx ConnectionContext
   ctx.Init()
+  playerId := ctx.GetPlayerId()
+
+  // Let other clients know
+  joinMsg := new(NetworkMsg)
+  joinMsg.PutByte(byte(SPlayerJoin))
+  joinMsg.PutString(playerId)
+  stats := ctx.GetPlayerStats()
+  joinMsg.PutFloat32(stats.Thrust)
+  joinMsg.PutFloat32(stats.MaxSpeed)
+  joinMsg.PutFloat32(stats.Rotation)
+  ws.propagateMsg(playerId, joinMsg)
+
+  // Let this client know about connected players
+  ws.connectedSockets.Range(func(key, value interface{}) bool {
+    connected := value.(gnet.Conn)
+    connectedCtx := connected.Context().(ConnectionContext)
+
+    if connectedCtx.GetPlayerId() != playerId {
+      connectedMsg := new(NetworkMsg)
+      connectedMsg.PutByte(byte(SPlayerJoin))
+      connectedMsg.PutString(playerId)
+      stats = connectedCtx.GetPlayerStats()
+      connectedMsg.PutFloat32(stats.Thrust)
+      connectedMsg.PutFloat32(stats.MaxSpeed)
+      connectedMsg.PutFloat32(stats.Rotation)
+      ctx.AddMsg(connectedMsg)
+    }
+
+    return true
+  })
+
+  // Let this client know their player stats
+  statsMsg := new(NetworkMsg)
+  statsMsg.PutByte(byte(SPlayerStats))
+  statsMsg.PutString(ctx.GetPlayerId())
+  statsMsg.PutFloat32(stats.Thrust)
+  statsMsg.PutFloat32(stats.MaxSpeed)
+  statsMsg.PutFloat32(stats.Rotation)
+  ctx.AddMsg(statsMsg);
 
   // queue world data msg
   worldInfoNetworkMsg := ws.worldMap.SerializeInfo()

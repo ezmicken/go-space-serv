@@ -14,4 +14,7 @@ const (
   SSpec
   SConnectionInfo
   SSync
+  SPlayerJoin
+  SPlayerLeave
+  SPlayerStats
 )
