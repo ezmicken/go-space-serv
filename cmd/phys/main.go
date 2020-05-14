@@ -119,7 +119,7 @@ func (ps *physicsServer) SimToPlayers() {
 }
 
 func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
-  log.Printf("Syncing %s", p.GetName())
+  log.Printf("Syncing %s @ %d", p.GetName(), helpers.NanosToMillis(syncTime))
   var syncMsg NetworkMsg
   syncMsg.PutByte(byte(SSync))
   syncMsg.PutUint16(ps.sim.GetSeq())
