@@ -150,16 +150,27 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
 }
 
 func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
-  cx := c.Context()
+  disconnectedCtx := c.Context().(ConnectionContext)
+  disconnectedPlayerId := disconnectedCtx.GetPlayerId();
 
-  if cx != nil {
-    ctx := cx.(ConnectionContext)
-    var physMsg NetworkMsg
-    physMsg.PutByte(byte(ILeave))
-    physMsg.PutString(ctx.GetPlayerId())
-    log.Printf("Sending disconnection event to physics");
-    ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
-  }
+  var physMsg NetworkMsg
+  physMsg.PutByte(byte(ILeave))
+  physMsg.PutString(disconnectedCtx.GetPlayerId())
+  log.Printf("Sending disconnection event to physics");
+  ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
+
+  // Let other clients know about this event
+  ws.connectedSockets.Range(func(key, value interface{}) bool {
+    ctx := value.(gnet.Conn).Context().(ConnectionContext)
+    if ctx.GetPlayerId() != disconnectedPlayerId {
+      disconnectedMsg := new(NetworkMsg)
+      disconnectedMsg.PutByte(byte(SPlayerLeave))
+      disconnectedMsg.PutString(disconnectedPlayerId)
+      ctx.AddMsg(disconnectedMsg)
+    }
+
+    return true
+  })
 }
 
 func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
@@ -210,8 +221,13 @@ func (ws *worldServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 
 func (ws *worldServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
   log.Printf("[%s] x", c.RemoteAddr().String())
-  ws.closePlayerConnection(c);
+
+  if !isPhysicsConnection(c) {
+    ws.closePlayerConnection(c);
+  }
+
   ws.connectedSockets.Delete(c.RemoteAddr().String())
+
   return
 }
 
