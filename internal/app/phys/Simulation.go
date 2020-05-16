@@ -169,6 +169,7 @@ func (s *Simulation) SpawnPlayer(in *UdpInput, player *UdpPlayer) {
 
   var msg NetworkMsg
   msg.PutByte(byte(SSpawn))
+  msg.PutString(playerName)
   msg.PutUint16(pBod.GetId())
   msg.PutUint32(spawnX)
   msg.PutUint32(spawnY)
