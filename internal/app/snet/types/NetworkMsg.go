@@ -10,6 +10,7 @@ import(
 type NetworkMsg struct {
   Size int
   Data []byte
+  SourceName string
 }
 
 func initData(msg *NetworkMsg) {

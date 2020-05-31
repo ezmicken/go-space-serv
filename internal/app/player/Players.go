@@ -57,7 +57,7 @@ func (p *Players) QueueMsgAll(msg *NetworkMsg) {
 	if msg != nil {
 	  p.playerMap.Range(func(key, value interface{}) bool {
 	    player := value.(*UdpPlayer)
-	    if player.IsActive() {
+	    if player.IsActive() && msg.SourceName != player.GetName() {
 	    	player.AddMsg(msg)
 	    }
 	    return true
