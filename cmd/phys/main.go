@@ -161,9 +161,10 @@ func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
 }
 
 func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+  bytes := append([]byte{}, data...)
   _ = ps.pool.Submit(func() {
     if len(data) >= 4 {
-      msg := snet.GetNetworkMsgFromData(data)
+      msg := snet.GetNetworkMsgFromData(bytes)
       if msg != nil {
         var i UdpInput
         i.Deserialize(msg)
