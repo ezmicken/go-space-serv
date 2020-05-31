@@ -3,13 +3,15 @@ package phys
 import (
   "encoding/binary"
   "bytes"
-  //"log"
+  "log"
 
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/helpers"
 
   "github.com/go-gl/mathgl/mgl32"
   "github.com/bgadrian/data-structures/priorityqueue"
+
+  . "go-space-serv/internal/app/snet/types"
 )
 
 // data
@@ -119,14 +121,25 @@ func readInput(data []byte, offset int) (byte, int64, int64) {
   return movementType, start, end
 }
 
-func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
+// Input data is as follows
+// | redundancy | (actCount | (act id | act duration |) * actCount |) * redundancy |
+// |   byte     |    byte   |  byte   |     int64    | ...
+//
+// Output is as follows
+// | seq | bodyId | validated copy of input... |
+func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) *NetworkMsg {
   if !b.history.Initialized {
     initHistory := b.GetHistoricalTransform()
     initHistory.Timestamp = frameStart
     b.history.Initialize(initHistory)
   }
 
+  var outputMsg NetworkMsg
+  outputMsg.PutByte(byte(SFrame))
+  outputMsg.PutUint16(b.id)
+
   for i := b.DequeueInput(); i != nil; {
+    outputMsg.PutUint16(i.GetSeq())
     if (i.GetType() == MOVE) {
       data := i.GetContent()
       dataLen := len(data)
@@ -134,6 +147,7 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
       stats := b.controllingPlayer.GetStats()
       offset := 0
       redundancy := data[0];
+      outputMsg.PutByte(redundancy)
       offset++;
 
       currentSeq := i.GetSeq() - uint16(redundancy)
@@ -145,15 +159,26 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
       var act byte
       var actDur int64
 
+      if offset >= dataLen {
+        log.Printf("Skipping input due to offset(%d) >= dataLen(%d)", offset, dataLen)
+      }
+
+      if currentSeq >= seq {
+        log.Printf("Skipping input due to currentSeq(%d) >= seq(%d)", currentSeq, seq)
+      }
+
       // Process this input msg
       for offset < dataLen && currentSeq < seq {
         actCount := data[offset]
+        outputMsg.PutByte(actCount)
         offset++
 
         for a := byte(0); a < actCount; a++ {
           act = data[offset]
+          outputMsg.PutByte(act)
           offset++
           actDur = snet.Read_int64(data[offset:offset+8])
+          outputMsg.PutUint64(uint64(actDur))
           offset += 8
           if act == LEFT {
             currentAngle += helpers.PerSecondOverTime(stats.Rotation, actDur)
@@ -163,6 +188,7 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
           }
 
           currentAngle = helpers.WrapFloat32(currentAngle, 0, 360)
+          log.Printf("%d: %f", currentSeq, currentAngle)
 
           if act == FORWARD {
             accel += helpers.PerSecondOverTime(stats.Thrust, actDur)
@@ -242,6 +268,13 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) {
       i = b.DequeueInput()
     }
   }
+
+  if outputMsg.Size > 6 {
+    log.Printf("output msg size: %d", outputMsg.Size)
+    return &outputMsg
+  }
+
+  return nil
 }
 
 // TODO: apply rotation?

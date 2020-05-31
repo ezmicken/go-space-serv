@@ -38,8 +38,6 @@ func (s *Simulation) Start(worldMap *world.WorldMap) {
 }
 
 func (s *Simulation) processFrame(frameStart int64) {
-  // initialize the frame
-  frame := NewUdpFrame(s.seq)
   frameStartMillis := helpers.NanosToMillis(frameStart)
 
   // Update all bodies
@@ -57,27 +55,18 @@ func (s *Simulation) processFrame(frameStart int64) {
 
     player := b.GetControllingPlayer()
     if player != nil && player.IsActive() {
-      b.ProcessInput(s.seq, frameStartMillis)
+      frameMsg := b.ProcessInput(s.seq, frameStartMillis)
+      if frameMsg != nil {
+        frameMsg.SourceName = player.GetName()
+        s.push(frameMsg)
+      }
     } else {
       log.Printf("player is nil on controlled body %d", b.GetId());
     }
 
     b.ApplyTransform(frameStartMillis)
-    frame.AddUdpBody(b)
   }
   s.allBodies = filteredBodies
-
-  // propagate input to clients
-  if frame.Len() > 0 {
-    serializedFrame := frame.Serialize()
-    var frameMsg NetworkMsg
-    frameMsg.PutByte(byte(SFrame))
-    frameMsg.PutUint16(s.seq)
-    frameMsg.PutBytes(serializedFrame)
-
-    // Send the frame to relevent players.
-    s.push(&frameMsg)
-  }
 }
 
 // Simulation loop
