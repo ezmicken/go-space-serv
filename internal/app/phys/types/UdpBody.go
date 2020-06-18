@@ -3,12 +3,12 @@ package phys
 import (
   "encoding/binary"
   "bytes"
-  "log"
+  //"log"
 
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/helpers"
 
-  "github.com/go-gl/mathgl/mgl32"
+  //"github.com/go-gl/mathgl/mgl32"
   "github.com/bgadrian/data-structures/priorityqueue"
 
   . "go-space-serv/internal/app/snet/types"
@@ -113,12 +113,8 @@ func (b *UdpBody) DequeueInput() *UdpInput {
   return nil
 }
 
-func readInput(data []byte, offset int) (byte, int64, int64) {
-  movementType := data[offset];
-  start := snet.Read_int64(data[offset+1:offset+9])
-  end := snet.Read_int64(data[offset+9:offset+17])
-
-  return movementType, start, end
+func (b *UdpBody) HasInput() bool {
+  return b.inputs.Len() > 0;
 }
 
 // Input data is as follows
@@ -134,145 +130,150 @@ func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) *NetworkMsg {
     b.history.Initialize(initHistory)
   }
 
-  var outputMsg NetworkMsg
-  outputMsg.PutByte(byte(SFrame))
-  outputMsg.PutUint16(b.id)
-
-  for i := b.DequeueInput(); i != nil; {
-    outputMsg.PutUint16(i.GetSeq())
-    if (i.GetType() == MOVE) {
-      data := i.GetContent()
-      dataLen := len(data)
-      accel := float32(0.0)
-      stats := b.controllingPlayer.GetStats()
-      offset := 0
-      redundancy := data[0];
-      outputMsg.PutByte(redundancy)
-      offset++;
-
-      currentSeq := i.GetSeq() - uint16(redundancy)
-      currentTime := helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
-      currentXPos, currentYPos, currentXVel, currentYVel, currentAngle := b.history.GetTransformAt(currentTime - helpers.GetConfiguredTimestep())
-      var currentVel mgl32.Vec3
-      currentVel[0] = currentXVel
-      currentVel[1] = currentYVel
-      var act byte
-      var actDur int64
-
-      if offset >= dataLen {
-        log.Printf("Skipping input due to offset(%d) >= dataLen(%d)", offset, dataLen)
-      }
-
-      if currentSeq >= seq {
-        log.Printf("Skipping input due to currentSeq(%d) >= seq(%d)", currentSeq, seq)
-      }
-
-      // Process this input msg
-      for offset < dataLen && currentSeq < seq {
-        actCount := data[offset]
-        outputMsg.PutByte(actCount)
-        offset++
-
-        for a := byte(0); a < actCount; a++ {
-          act = data[offset]
-          outputMsg.PutByte(act)
-          offset++
-          actDur = snet.Read_int64(data[offset:offset+8])
-          outputMsg.PutUint64(uint64(actDur))
-          offset += 8
-          if act == LEFT {
-            currentAngle += helpers.PerSecondOverTime(stats.Rotation, actDur)
-          }
-          if act == RIGHT {
-            currentAngle -= helpers.PerSecondOverTime(stats.Rotation, actDur)
-          }
-
-          currentAngle = helpers.WrapFloat32(currentAngle, 0, 360)
-          log.Printf("%d: %f", currentSeq, currentAngle)
-
-          if act == FORWARD {
-            accel += helpers.PerSecondOverTime(stats.Thrust, actDur)
-          }
-          if act == BACKWARD {
-            accel -= helpers.PerSecondOverTime(stats.Thrust, actDur)
-          }
-        }
-
-        if accel != 0 {
-          q := mgl32.AnglesToQuat(mgl32.DegToRad(currentAngle), 0, 0, mgl32.ZYX).Normalize()
-
-          // Apply force along the Y axis
-          accVec := mgl32.Vec3{0, accel, 0}
-          velVec := mgl32.Vec3{currentXVel, currentYVel, 0}
-
-          // Rotate & Add the acceleration vector to velocity
-          currentVel = velVec.Add(q.Rotate(accVec))
-        }
-
-        // Clamp velocity to max speed
-        if currentVel.LenSqr() > (stats.MaxSpeed * stats.MaxSpeed) {
-          currentVel = currentVel.Normalize().Mul(stats.MaxSpeed)
-        }
-
-        // Update velocity
-        currentXPos += currentVel[0]
-        currentYPos += currentVel[1]
-        currentXVel = currentVel[0]
-        currentYVel = currentVel[1]
-
-        var crumb HistoricalTransform
-        crumb.Timestamp = currentTime
-        crumb.Angle = currentAngle
-        crumb.XPos = currentXPos
-        crumb.YPos = currentYPos
-        crumb.XVel = currentXVel
-        crumb.YVel = currentYVel
-        b.history.Insert(crumb)
-
-        accel = float32(0)
-
-        // detect and handle world collision
-
-        // detect and handle body collision
-        // get objects near this one
-        // add to list of object groups to check for collision
-        currentSeq++
-        currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
-      }
-
-      // apply changes to history
-      for currentTime < frameStart {
-        // Update velocity
-        currentXPos += currentVel[0]
-        currentYPos += currentVel[1]
-
-        // collision check
-
-        var crumb HistoricalTransform
-        crumb.Timestamp = currentTime
-        crumb.Angle = currentAngle
-        crumb.XPos = currentXPos
-        crumb.YPos = currentYPos
-        crumb.XVel = currentXVel
-        crumb.YVel = currentYVel
-        b.history.Insert(crumb)
-
-        currentSeq++
-        currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
-      }
-
-      b.rot = currentAngle
-
-      b.SetVel(currentVel[0], currentVel[1])
-
-      i = b.DequeueInput()
-    }
-  }
-
-  if outputMsg.Size > 6 {
-    log.Printf("output msg size: %d", outputMsg.Size)
+  i := b.DequeueInput()
+  if i != nil {
+    var outputMsg NetworkMsg
+    outputMsg.PutByte(byte(SFrame))
+    outputMsg.PutUint16(b.id)
+    outputMsg.PutBytes(i.GetContent())
     return &outputMsg
   }
+
+  // for i := b.DequeueInput(); i != nil; {
+  //   outputMsg.PutUint16(i.GetSeq())
+    // if (i.GetType() == MOVE) {
+    //   data := i.GetContent()
+    //   dataLen := len(data)
+    //   accel := float32(0.0)
+    //   stats := b.controllingPlayer.GetStats()
+    //   offset := 0
+    //   redundancy := data[0];
+    //   outputMsg.PutByte(redundancy)
+    //   offset++;
+
+    //   currentSeq := i.GetSeq() - uint16(redundancy)
+    //   currentTime := helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+    //   currentXPos, currentYPos, currentXVel, currentYVel, currentAngle := b.history.GetTransformAt(currentTime - helpers.GetConfiguredTimestep())
+    //   var currentVel mgl32.Vec3
+    //   currentVel[0] = currentXVel
+    //   currentVel[1] = currentYVel
+    //   var act byte
+    //   var actDur int64
+
+    //   if offset >= dataLen {
+    //     log.Printf("Skipping input due to offset(%d) >= dataLen(%d)", offset, dataLen)
+    //   }
+
+    //   if currentSeq >= seq {
+    //     log.Printf("Skipping input due to currentSeq(%d) >= seq(%d)", currentSeq, seq)
+    //   }
+
+    //   // Process this input msg
+    //   for offset < dataLen && currentSeq < seq {
+    //     actCount := data[offset]
+    //     outputMsg.PutByte(actCount)
+    //     offset++
+
+    //     for a := byte(0); a < actCount; a++ {
+    //       act = data[offset]
+    //       outputMsg.PutByte(act)
+    //       offset++
+    //       actDur = snet.Read_int64(data[offset:offset+8])
+    //       outputMsg.PutUint64(uint64(actDur))
+    //       offset += 8
+    //       if act == LEFT {
+    //         currentAngle += helpers.PerSecondOverTime(stats.Rotation, actDur)
+    //       }
+    //       if act == RIGHT {
+    //         currentAngle -= helpers.PerSecondOverTime(stats.Rotation, actDur)
+    //       }
+
+    //       currentAngle = helpers.WrapFloat32(currentAngle, 0, 360)
+    //       log.Printf("%d: %f", currentSeq, currentAngle)
+
+    //       if act == FORWARD {
+    //         accel += helpers.PerSecondOverTime(stats.Thrust, actDur)
+    //       }
+    //       if act == BACKWARD {
+    //         accel -= helpers.PerSecondOverTime(stats.Thrust, actDur)
+    //       }
+    //     }
+
+    //     if accel != 0 {
+    //       q := mgl32.AnglesToQuat(mgl32.DegToRad(currentAngle), 0, 0, mgl32.ZYX).Normalize()
+
+    //       // Apply force along the Y axis
+    //       accVec := mgl32.Vec3{0, accel, 0}
+    //       velVec := mgl32.Vec3{currentXVel, currentYVel, 0}
+
+    //       // Rotate & Add the acceleration vector to velocity
+    //       currentVel = velVec.Add(q.Rotate(accVec))
+    //     }
+
+    //     // Clamp velocity to max speed
+    //     if currentVel.LenSqr() > (stats.MaxSpeed * stats.MaxSpeed) {
+    //       currentVel = currentVel.Normalize().Mul(stats.MaxSpeed)
+    //     }
+
+    //     // Update velocity
+    //     currentXPos += currentVel[0]
+    //     currentYPos += currentVel[1]
+    //     currentXVel = currentVel[0]
+    //     currentYVel = currentVel[1]
+
+    //     var crumb HistoricalTransform
+    //     crumb.Timestamp = currentTime
+    //     crumb.Angle = currentAngle
+    //     crumb.XPos = currentXPos
+    //     crumb.YPos = currentYPos
+    //     crumb.XVel = currentXVel
+    //     crumb.YVel = currentYVel
+    //     b.history.Insert(crumb)
+
+    //     accel = float32(0)
+
+    //     // detect and handle world collision
+
+    //     // detect and handle body collision
+    //     // get objects near this one
+    //     // add to list of object groups to check for collision
+    //     currentSeq++
+    //     currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+    //   }
+
+    //   // apply changes to history
+    //   for currentTime < frameStart {
+    //     // Update velocity
+    //     currentXPos += currentVel[0]
+    //     currentYPos += currentVel[1]
+
+    //     // collision check
+
+    //     var crumb HistoricalTransform
+    //     crumb.Timestamp = currentTime
+    //     crumb.Angle = currentAngle
+    //     crumb.XPos = currentXPos
+    //     crumb.YPos = currentYPos
+    //     crumb.XVel = currentXVel
+    //     crumb.YVel = currentYVel
+    //     b.history.Insert(crumb)
+
+    //     currentSeq++
+    //     currentTime = helpers.SeqToMillis(currentSeq, b.controllingPlayer.lastSync)
+    //   }
+
+    //   b.rot = currentAngle
+
+    //   b.SetVel(currentVel[0], currentVel[1])
+
+  //     i = b.DequeueInput()
+  //   }
+  // }
+
+  // if outputMsg.Size > 6 {
+  //   log.Printf("output msg size: %d", outputMsg.Size)
+  //   return &outputMsg
+  // }
 
   return nil
 }

@@ -55,10 +55,12 @@ func (s *Simulation) processFrame(frameStart int64) {
 
     player := b.GetControllingPlayer()
     if player != nil && player.IsActive() {
-      frameMsg := b.ProcessInput(s.seq, frameStartMillis)
-      if frameMsg != nil {
-        frameMsg.SourceName = player.GetName()
-        s.push(frameMsg)
+      for b.HasInput() {
+        frameMsg := b.ProcessInput(s.seq, frameStartMillis)
+        if frameMsg != nil {
+          frameMsg.SourceName = player.GetName()
+          s.push(frameMsg)
+        }
       }
     } else {
       log.Printf("player is nil on controlled body %d", b.GetId());
