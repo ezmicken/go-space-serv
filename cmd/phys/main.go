@@ -59,6 +59,18 @@ const maxMsgSize  int     = 1500
 const udpAddr     string  = "udp://:9495";
 const udpPort     int     = 9495
 
+func SDBMHash(str string) uint32 {
+  var hash uint32 = 0;
+  var i uint32 = 0;
+  var length uint32 = uint32(len(str))
+
+  for i = 0; i < length; i++ {
+    hash = uint32(byte(str[int(i)])) + (hash << 6) + (hash << 16) - hash
+  }
+
+  return hash;
+}
+
 func main() {
   p := goroutine.Default()
   defer p.Release()
@@ -68,7 +80,12 @@ func main() {
   var config helpers.Config
   config.TIMESTEP = 34
   config.TIMESTEP_NANO = 34000000
+  config.NAME = "SPACE-PHYS"
+  config.VERSION = "0.0.1"
+  config.PROTOCOL_ID = SDBMHash(config.NAME + config.VERSION)
   helpers.SetConfig(&config)
+
+  log.Printf("PROTOCOL_ID: %d", config.PROTOCOL_ID)
 
   // connect via TCP to the world server
   dialer := &net.Dialer{
@@ -140,6 +157,7 @@ func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
     // TODO: authenticate
     if i.GetType() == HELLO && !player.IsActive() {
       log.Printf("%s connected.", playerName)
+      log.Printf("%s", c.RemoteAddr())
       player.Activate()
       player.SetState(SPECTATING)
       player.SetConnection(c)
