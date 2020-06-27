@@ -5,6 +5,9 @@ import (
   "time"
   "net"
   "bufio"
+  "math/rand"
+  "encoding/binary"
+  "sync"
   //"runtime"
   //"runtime/debug"
 
@@ -38,6 +41,7 @@ type physicsServer struct {
 
   players             player.Players
   sim                 phys.Simulation
+  ipsToPlayers        sync.Map
 
   launchTime          int64
   tick                time.Duration // loop speed
@@ -49,15 +53,26 @@ type physicsServer struct {
   worldMapLen         int
 }
 
+type UDPCmd byte
+
+const (
+  HELLO UDPCmd = iota + 1
+  SHUTUP
+  DISCONNECT
+  CHALLENGE
+  WELCOME
+)
+
 // protocol constants
 // message structure is as follows:
 // [ length, command, content ]
 //     4b       1b    <= 4091b
-const prefixLen   int     = 4
-const cmdLen      int     = 1
-const maxMsgSize  int     = 1500
-const udpAddr     string  = "udp://:9495";
-const udpPort     int     = 9495
+const prefixLen         int     = 4
+const cmdLen            int     = 1
+const maxMsgSize        int     = 1024
+const udpAddr           string  = "udp://:9495";
+const udpPort           int     = 9495
+const maxPacketRetries  int     = 20
 
 func SDBMHash(str string) uint32 {
   var hash uint32 = 0;
@@ -118,6 +133,8 @@ func main() {
   // consume queue of outgoing messages to all clients.
   go ps.Output()
 
+  rand.Seed(time.Now().UnixNano())
+
   log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
 }
 
@@ -150,46 +167,141 @@ func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
 }
 
 func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
-  playerName := i.GetName()
-  player := ps.players.GetPlayer(playerName)
+  // playerName := i.GetName()
+  // player := ps.players.GetPlayer(playerName)
 
-  if player != nil {
-    // TODO: authenticate
-    if i.GetType() == HELLO && !player.IsActive() {
-      log.Printf("%s connected.", playerName)
-      log.Printf("%s", c.RemoteAddr())
-      player.Activate()
-      player.SetState(SPECTATING)
-      player.SetConnection(c)
-      ps.SyncPlayer(player, ps.sim.GetLastSync())
-    }
+  // if player != nil {
+  //   // TODO: authenticate
+  //   if i.GetType() == HELLO && !player.IsActive() {
+  //     log.Printf("%s connected.", playerName)
+  //     log.Printf("%s", c.RemoteAddr())
+  //     player.Activate()
+  //     player.SetState(SPECTATING)
+  //     player.SetConnection(c)
+  //     ps.SyncPlayer(player, ps.sim.GetLastSync())
+  //   }
 
-    switch cmd := i.GetType(); cmd {
-      case MOVE:
-        ps.sim.AddMove(&i)
-      case SPAWN:
-        player := ps.players.GetPlayer(i.GetName())
-        if player != nil {
-          ps.sim.SpawnPlayer(&i, player)
-        }
-    }
-  }
+  //   switch cmd := i.GetType(); cmd {
+  //     case MOVE:
+  //       ps.sim.AddMove(&i)
+  //     case SPAWN:
+  //       player := ps.players.GetPlayer(i.GetName())
+  //       if player != nil {
+  //         ps.sim.SpawnPlayer(&i, player)
+  //       }
+  //   }
+  // }
 
   return
 }
 
-func (ps *physicsServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-  bytes := append([]byte{}, data...)
-  _ = ps.pool.Submit(func() {
-    if len(data) >= 4 {
-      msg := snet.GetNetworkMsgFromData(bytes)
-      if msg != nil {
-        var i UdpInput
-        i.Deserialize(msg)
-        ps.interpret(i, c)
-      }
+type UDPHeader struct {
+  protocolId uint32
+  seq uint16
+  ack uint16
+}
+
+func (ps *physicsServer) ipIsValid(ip string) bool {
+  found := false
+  ps.ipsToPlayers.Range(func(key, value interface{}) bool {
+    if key.(string) == ip {
+      found = true
+      return false
     }
+    return true
   })
+
+  return found
+}
+
+func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, action gnet.Action) {
+  valid := true
+  ipString := connection.RemoteAddr().(*net.UDPAddr).IP.String()
+  valid = valid && ps.ipIsValid(ipString)
+
+  if valid {
+    log.Printf("Received packet from valid IP")
+    bytes := append([]byte{}, data...)
+    _ = ps.pool.Submit(func() {
+      var player *UdpPlayer
+      playerId, ok := ps.ipsToPlayers.Load(ipString)
+      if ok {
+        log.Printf("Found player")
+        player = ps.players.GetPlayer(playerId.(string))
+      }
+
+      valid = valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId()
+      if valid && player != nil {
+        log.Printf("ProtocolId is valid")
+
+        // Respond to HELLO with CHALLENGE
+        if player.GetState() == DISCONNECTED {
+          // enforce padding to avoid participating in DDoS minification
+          if len(bytes) != maxMsgSize {
+            log.Printf("Rejecting packet due to lack of padding.")
+            return
+          }
+
+          cmd := UDPCmd(bytes[4])
+          if cmd == HELLO {
+            log.Printf("Received HELLO");
+            clientSalt := snet.Read_int64(bytes[5:13])
+            log.Printf("client salt: %d", clientSalt)
+            player.SetClientSalt(clientSalt)
+            serverSalt := rand.Int63()
+            log.Printf("server salt: %d", serverSalt)
+            player.SetServerSalt(serverSalt)
+            player.SetConnection(connection)
+
+            msgBytes := make([]byte, maxMsgSize)
+            binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
+            msgBytes[4] = byte(CHALLENGE)
+            binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(clientSalt))
+            binary.LittleEndian.PutUint64(msgBytes[13:21], uint64(serverSalt))
+            player.SendRepeating(msgBytes, 500, 20)
+            player.SetState(CHALLENGED)
+          }
+
+          return
+        }
+        if player.GetState() == CHALLENGED {
+          // enforce padding to avoid participating in DDoS minification
+          if len(bytes) != maxMsgSize {
+            log.Printf("Rejecting packet due to lack of padding.")
+            return
+          }
+
+          cmd := UDPCmd(bytes[4])
+          if cmd == CHALLENGE {
+            log.Printf("Received CHALLENGE");
+            clientSalt := player.GetClientSalt()
+            serverSalt := player.GetServerSalt()
+            challengeResponse := snet.Read_int64(bytes[5:13])
+            if challengeResponse == clientSalt ^ serverSalt {
+              log.Printf("SUCCESS");
+              player.SetState(CONNECTED)
+              log.Printf("%s passed challenge, welcoming.", ipString)
+              msgBytes := make([]byte, 13)
+              binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
+              msgBytes[4] = byte(WELCOME)
+              binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(clientSalt ^ serverSalt))
+              player.SendRepeating(msgBytes, 500, 20)
+            } else {
+              log.Printf("%s failed challenge with %d", clientSalt ^ serverSalt)
+            }
+          }
+
+          return
+        }
+
+        // state == CONNECTED
+      } else {
+        log.Printf("Invalid protocolId")
+      }
+    })
+  } else {
+    log.Printf("Invalid IP %s", ipString)
+  }
 
   return
 }
@@ -304,7 +416,11 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
               playerIdLenBytes := eventContent[1:3]
               playerIdLen := snet.Read_uint16(playerIdLenBytes)
               playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
+              ipLen := snet.Read_uint16(eventContent[3+playerIdLen:3+playerIdLen+2])
+              ipString := snet.Read_utf8(eventContent[3+playerIdLen+2:3+playerIdLen+2+ipLen])
               ps.players.Add(playerId, NewPlayerStats())
+              log.Printf("Storing %s <-> %s", ipString, playerId)
+              ps.ipsToPlayers.Store(ipString, playerId);
             } else if eventContent[0] == byte(ILeave) {
               playerIdLenBytes := eventContent[1:3]
               playerIdLen := snet.Read_uint16(playerIdLenBytes)
