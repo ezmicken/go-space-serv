@@ -54,6 +54,13 @@ func Read_uint16(data []byte) uint16 {
   return ret16
 }
 
+func Read_uint32(data []byte) uint32 {
+  var ret32 uint32
+  buf := bytes.NewBuffer(data)
+  binary.Read(buf, binary.LittleEndian, &ret32)
+  return ret32
+}
+
 func Read_utf8(data []byte) string {
   var utf8Name strings.Builder
   for len(data) > 0 {
