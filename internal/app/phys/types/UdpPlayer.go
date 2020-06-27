@@ -1,8 +1,10 @@
 package phys
 
 import(
-  "github.com/panjf2000/gnet"
+  "time"
   "log"
+
+  "github.com/panjf2000/gnet"
 
   ."go-space-serv/internal/app/player/types"
   ."go-space-serv/internal/app/snet/types"
@@ -10,15 +12,20 @@ import(
 type UdpPlayerState byte
 
 const (
-  CONNECTED UdpPlayerState = iota
+  DISCONNECTED UdpPlayerState = iota
+  CHALLENGED
+  CONNECTED
   PLAYING
   SPECTATING
 )
 
 type UdpPlayer struct {
+  spamChan chan struct{}
   name string
   active bool
   lastSync int64
+  clientSalt int64
+  serverSalt int64
   connection gnet.Conn
   output chan *NetworkMsg
   state UdpPlayerState
@@ -29,11 +36,45 @@ func NewUdpPlayer(n string) *UdpPlayer{
   var p UdpPlayer
   p.name = n
   p.active = false
-  p.state = CONNECTED
+  p.state = DISCONNECTED
   p.lastSync = 0
   p.output = make(chan *NetworkMsg, 100)
   return &p
 }
+
+// Sends a packet every rate milliseconds count times
+func (p *UdpPlayer) SendRepeating(msg []byte, rate, count int) {
+  if p.spamChan != nil {
+    close(p.spamChan)
+  }
+
+  log.Printf("sending first %d", msg[4])
+  p.connection.SendTo(msg)
+
+  // Use a local reference to the chan
+  // for the case where it was closed
+  // and re-opened during Sleep
+  thisChan := make(chan struct{})
+  p.spamChan = thisChan
+
+  go func() {
+    for i := 0; i < count; i++ {
+      _, open := <-thisChan
+      if (!open) {
+        return
+      }
+
+      log.Printf("sending %d (iteration %d)", msg[4], i)
+      p.connection.SendTo(msg)
+      time.Sleep(time.Duration(rate) * time.Millisecond)
+    }
+
+    log.Printf("Player.SendRepeating finished all iterations.")
+    close(thisChan)
+  }()
+}
+
+
 
 func (p *UdpPlayer) AddMsg(msg *NetworkMsg) {
 	select {
@@ -88,6 +129,19 @@ func (p *UdpPlayer) GetState() UdpPlayerState {
 
 func (p *UdpPlayer) SetConnection(c gnet.Conn) {
   p.connection = c
+}
+
+func (p *UdpPlayer) SetClientSalt(salt int64) {
+  p.clientSalt = salt
+}
+func (p *UdpPlayer) GetClientSalt() int64 {
+  return p.clientSalt
+}
+func (p *UdpPlayer) SetServerSalt(salt int64) {
+  p.serverSalt = salt
+}
+func (p *UdpPlayer) GetServerSalt() int64 {
+  return p.serverSalt
 }
 
 func (p *UdpPlayer) GetConnection() gnet.Conn {
