@@ -8,10 +8,6 @@ import (
   "go-space-serv/internal/app/snet"
 
   //"github.com/go-gl/mathgl/mgl32"
-  "github.com/bgadrian/data-structures/priorityqueue"
-
-  . "go-space-serv/internal/app/snet/types"
-  . "go-space-serv/internal/app/phys/types"
 )
 
 // data
@@ -21,7 +17,6 @@ type UdpBody struct {
   // these are used only by server
   controllingPlayer *UdpPlayer
   owningPlayer      *UdpPlayer
-  inputs            *priorityqueue.HierarchicalQueue
   dead              bool
 
   id   uint16
@@ -59,7 +54,6 @@ func NewControlledUdpBody(player *UdpPlayer) (*UdpBody) {
   bod.controllingPlayer = player
   bod.owningPlayer = player
   bod.dead = false;
-  bod.inputs = priorityqueue.NewHierarchicalQueue(255, true)
 
   bod.xPos = 0
   bod.yPos = 0
@@ -83,53 +77,6 @@ func NewUdpBody() (*UdpBody) {
   b.dead = false;
 
   return &b
-}
-
-// actions
-//////////////////////
-
-func (b *UdpBody) QueueInput(i *UdpInput) {
-  b.inputs.Enqueue(i, 1)
-}
-
-func (b *UdpBody) DequeueInput() *UdpInput {
-  if b.inputs.Len() > 0 {
-    i, err := b.inputs.Dequeue()
-    if err != nil {
-      panic(err)
-    }
-    input, ok := i.(*UdpInput)
-    if !ok {
-      return nil
-    }
-
-    return input
-  }
-
-  return nil
-}
-
-func (b *UdpBody) HasInput() bool {
-  return b.inputs.Len() > 0;
-}
-
-// Input data is as follows
-// | redundancy | (actCount | (act id | act duration |) * actCount |) * redundancy |
-// |   byte     |    byte   |  byte   |     int64    | ...
-//
-// Output is as follows
-// | seq | bodyId | validated copy of input... |
-func (b *UdpBody) ProcessInput(seq uint16, frameStart int64) *NetworkMsg {
-  i := b.DequeueInput()
-  if i != nil {
-    var outputMsg NetworkMsg
-    outputMsg.PutByte(byte(SFrame))
-    outputMsg.PutUint16(b.id)
-    outputMsg.PutBytes(i.GetContent())
-    return &outputMsg
-  }
-
-  return nil
 }
 
 // access / modify
