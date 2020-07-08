@@ -15,64 +15,20 @@ import (
   "github.com/panjf2000/gnet/pool/goroutine"
 
   "go-space-serv/internal/app/snet"
-  "go-space-serv/internal/app/helpers"
+  "go-space-serv/internal/app/util"
   "go-space-serv/internal/app/world"
-  "go-space-serv/internal/app/player"
   "go-space-serv/internal/app/phys"
 
   . "go-space-serv/internal/app/player/types"
+  . "go-space-serv/internal/app/phys"
   . "go-space-serv/internal/app/phys/types"
   . "go-space-serv/internal/app/snet/types"
 )
 
-// physicsServer's job is to run the physics simulation
-// and propagate input between clients.
-// The simulation runs at 30fps and the loop runs
-// at or near 120fps.
-// server chooses a time to start simulation
-// and updates it every 256 frames.
-// server sends this time to clients so that they
-// can simulate from the same time as well. This
-// keeps the numbers from growing too large.
-
-type physicsServer struct {
-  *gnet.EventServer
-  pool                *goroutine.Pool
-
-  players             player.Players
-  sim                 phys.Simulation
-  ipsToPlayers        sync.Map
-
-  launchTime          int64
-  tick                time.Duration // loop speed
-
-  // World map data
-  worldConn           net.Conn
-  worldMap            world.WorldMap
-  worldMapBytes       []byte
-  worldMapLen         int
-}
-
-type UDPCmd byte
-
-const (
-  HELLO UDPCmd = iota + 1
-  SHUTUP
-  DISCONNECT
-  CHALLENGE
-  WELCOME
-)
-
-// protocol constants
-// message structure is as follows:
-// [ length, command, content ]
-//     4b       1b    <= 4091b
-const prefixLen         int     = 4
 const cmdLen            int     = 1
 const maxMsgSize        int     = 1024
 const udpAddr           string  = "udp://:9495";
 const udpPort           int     = 9495
-const maxPacketRetries  int     = 20
 
 func SDBMHash(str string) uint32 {
   var hash uint32 = 0;
@@ -84,6 +40,24 @@ func SDBMHash(str string) uint32 {
   }
 
   return hash;
+}
+
+type physicsServer struct {
+  *gnet.EventServer
+  pool                *goroutine.Pool
+
+  players             Players
+  sim                 phys.Simulation
+  ipsToPlayers        sync.Map
+
+  launchTime          int64
+  tick                time.Duration // loop speed
+
+  // World map data
+  worldConn           net.Conn
+  worldMap            world.WorldMap
+  worldMapBytes       []byte
+  worldMapLen         int
 }
 
 func main() {
@@ -127,78 +101,9 @@ func main() {
   // react to events from world server
   go ps.ReactWorld(conn)
 
-  // propagate sim output to all players
-  go ps.SimToPlayers()
-
-  // consume queue of outgoing messages to all clients.
-  go ps.Output()
-
   rand.Seed(time.Now().UnixNano())
 
   log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
-}
-
-func (ps *physicsServer) Output() {
-  for {
-    ps.players.SendQueuedMsgs()
-    time.Sleep(32)
-  }
-}
-
-func (ps *physicsServer) SimToPlayers() {
-  for {
-    ps.players.QueueMsgAll(ps.sim.Pull())
-    time.Sleep(32)
-  }
-}
-
-func (ps *physicsServer) SyncPlayer(p *UdpPlayer, syncTime int64) {
-  log.Printf("Syncing %s @ %d", p.GetName(), helpers.NanosToMillis(syncTime))
-  var syncMsg NetworkMsg
-  syncMsg.PutByte(byte(SSync))
-  syncMsg.PutUint16(ps.sim.GetSeq())
-  syncMsg.PutUint64(uint64(helpers.NanosToMillis(syncTime)))
-
-  if p.IsActive() {
-    p.Sync(syncTime)
-    p.AddMsg(&syncMsg)
-    log.Printf("Synced %s", p.GetName())
-  }
-}
-
-func (ps *physicsServer) interpret(i UdpInput, c gnet.Conn) (out []byte) {
-  // playerName := i.GetName()
-  // player := ps.players.GetPlayer(playerName)
-
-  // if player != nil {
-  //   // TODO: authenticate
-  //   if i.GetType() == HELLO && !player.IsActive() {
-  //     log.Printf("%s connected.", playerName)
-  //     log.Printf("%s", c.RemoteAddr())
-  //     player.Activate()
-  //     player.SetState(SPECTATING)
-  //     player.SetConnection(c)
-  //     ps.SyncPlayer(player, ps.sim.GetLastSync())
-  //   }
-
-  //   switch cmd := i.GetType(); cmd {
-  //     case MOVE:
-  //       ps.sim.AddMove(&i)
-  //     case SPAWN:
-  //       player := ps.players.GetPlayer(i.GetName())
-  //       if player != nil {
-  //         ps.sim.SpawnPlayer(&i, player)
-  //       }
-  //   }
-  // }
-
-  return
-}
-
-type UDPHeader struct {
-  protocolId uint32
-  seq uint16
-  ack uint16
 }
 
 func (ps *physicsServer) ipIsValid(ip string) bool {
@@ -220,19 +125,16 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
   valid = valid && ps.ipIsValid(ipString)
 
   if valid {
-    log.Printf("Received packet from valid IP")
     bytes := append([]byte{}, data...)
     _ = ps.pool.Submit(func() {
       var player *UdpPlayer
       playerId, ok := ps.ipsToPlayers.Load(ipString)
       if ok {
-        log.Printf("Found player")
         player = ps.players.GetPlayer(playerId.(string))
       }
 
       valid = valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId()
       if valid && player != nil {
-        log.Printf("ProtocolId is valid")
 
         // Respond to HELLO with CHALLENGE
         if player.GetState() == DISCONNECTED {
@@ -280,12 +182,14 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
             if challengeResponse == clientSalt ^ serverSalt {
               log.Printf("SUCCESS");
               player.SetState(CONNECTED)
+              player.SetSimChan(ps.sim.GetPlayerChan())
               log.Printf("%s passed challenge, welcoming.", ipString)
               msgBytes := make([]byte, 13)
               binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
               msgBytes[4] = byte(WELCOME)
               binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(clientSalt ^ serverSalt))
               player.SendRepeating(msgBytes, 500, 20)
+              player.SetState(SPECTATING)
             } else {
               log.Printf("%s failed challenge with %d", clientSalt ^ serverSalt)
             }
@@ -295,8 +199,7 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
         }
 
         // state == CONNECTED
-      } else {
-        log.Printf("Invalid protocolId")
+        player.Unpack(bytes[4:])
       }
     })
   } else {
@@ -401,7 +304,7 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
           msg.PutUint32(udpPort)
           c.Write(snet.GetDataFromNetworkMsg(&msg))
 
-          ps.sim.Start(&ps.worldMap);
+          ps.sim.Start(&ps.worldMap, &ps.players);
         }
       case readingEvent:
         eventSizeBytes, err := reader.Peek(4)
