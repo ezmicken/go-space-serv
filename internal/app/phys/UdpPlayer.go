@@ -276,13 +276,16 @@ func (p *UdpPlayer) Unpack(packet []byte) {
     for head < msgLen {
       head++
 
+      // TODO: offload to interpreter
       if cmd == SYNC {
-        log.Printf("Received SYNC request from %s", p.name)
-        msg := &SyncRequestMsg{}
+        log.Printf("Received SYNC(%d) request from %s", cmd, p.name)
+        msg := &CmdMsg{}
+        msg.SetCmd(cmd)
         msg.SetPlayerId(p.name)
         p.toSim <- msg
         head += msg.GetSize()
       }
+
       tail = head
     }
   }

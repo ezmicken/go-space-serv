@@ -10,5 +10,6 @@ const (
   CHALLENGE
   WELCOME
   SYNC
+  SPAWN
 )
 

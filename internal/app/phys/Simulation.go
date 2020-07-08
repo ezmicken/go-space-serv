@@ -1,7 +1,7 @@
 package phys
 
 import (
-  "log"
+  //"log"
   "sync"
   "time"
 
@@ -9,6 +9,7 @@ import (
   "go-space-serv/internal/app/world"
 
   . "go-space-serv/internal/app/phys/msg"
+  . "go-space-serv/internal/app/phys/types"
 )
 
 type Simulation struct {
@@ -51,16 +52,20 @@ func (s *Simulation) processFrame(frameStart int64) {
     }
 
     switch t := tmp.(type) {
-      case *SyncRequestMsg:
+      case *CmdMsg:
         msg := t
         playerId := msg.GetPlayerId()
-        syncTime := s.lastFrame / (int64(time.Millisecond) / int64(time.Nanosecond))
+        cmd := msg.GetCmd()
+        switch cmd {
+          case SYNC:
+            syncTime := s.lastFrame / (int64(time.Millisecond) / int64(time.Nanosecond))
 
-        var response SyncMsg
-        response.Seq = s.seq
-        response.Time = uint64(syncTime)
+            var response SyncMsg
+            response.Seq = s.seq
+            response.Time = uint64(syncTime)
 
-        s.players.AddMsg(&response, playerId)
+            s.players.AddMsg(&response, playerId)
+        }
       default:
     }
   }
