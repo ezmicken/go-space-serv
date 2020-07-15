@@ -1,14 +1,16 @@
 package phys
 
 import (
-  //"log"
+  "log"
   "sync"
   "time"
 
   "go-space-serv/internal/app/util"
   "go-space-serv/internal/app/world"
 
-  . "go-space-serv/internal/app/phys/msg"
+  . "go-space-serv/internal/app/phys/msg/incoming"
+  . "go-space-serv/internal/app/phys/msg/outgoing"
+  . "go-space-serv/internal/app/phys/interface"
   . "go-space-serv/internal/app/phys/types"
 )
 
@@ -24,12 +26,12 @@ type Simulation struct {
   lastFrame           int64  // unix nanos since the last simulation frame
   framesSinceLastSync int64  // simulation frames since last sync
 
-  fromPlayers chan interface{}
+  fromPlayers chan UDPMsg // incoming msgs from clients (UdpPlayer)
 }
 
 func (s *Simulation) Start(worldMap *world.WorldMap, players *Players) {
   s.players = players
-  s.fromPlayers = make(chan interface{}, 100)
+  s.fromPlayers = make(chan UDPMsg, 100)
   s.worldMap = worldMap
   s.seq = 0
   s.lastSync = 0
@@ -65,7 +67,32 @@ func (s *Simulation) processFrame(frameStart int64) {
             response.Time = uint64(syncTime)
 
             s.players.AddMsg(&response, playerId)
+          case ENTER:
+            // TODO: verify rtt/ploss limit
+            player := s.players.GetPlayer(playerId)
+            if player != nil && player.GetState() != SPECTATING {
+              log.Printf("player %s spawn when not spectating.", playerId)
+              break
+            }
+
+            spawnX := s.worldMap.SpawnX
+            spawnY := s.worldMap.SpawnY
+            x, y := s.worldMap.GetCellCenter(spawnX, spawnY)
+            pBod := NewControlledUdpBody(player)
+            pBod.SetPos(x, y)
+            s.addControlledBody(playerId, pBod)
+
+            log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
+
+            var response EnterMsg
+            response.PlayerId = player.GetName()
+            response.BodyId = pBod.GetId();
+            response.X = uint32(spawnX)
+            response.Y = uint32(spawnY)
+            s.players.AddMsg(&response, playerId)
         }
+      case *MoveShootMsg:
+        break
       default:
     }
   }
@@ -135,33 +162,6 @@ func (s *Simulation) pullFromPlayers() interface{} {
   return tmp
 }
 
-// func (s *Simulation) SpawnPlayer(in *UdpInput, player *UdpPlayer) {
-//   playerName := in.GetName()
-
-//   if player != nil && player.GetState() != SPECTATING {
-//     log.Printf("player %s spawn when not spectating", playerName)
-//     return
-//   }
-
-//   // OK, add body to simulation
-//   spawnX := s.worldMap.SpawnX
-//   spawnY := s.worldMap.SpawnY
-//   x, y := s.worldMap.GetCellCenter(spawnX, spawnY)
-//   pBod := NewControlledUdpBody(player)
-//   pBod.SetPos(x, y)
-//   s.addControlledBody(playerName, pBod)
-
-//   var msg NetworkMsg
-//   msg.PutByte(byte(SSpawn))
-//   msg.PutString(playerName)
-//   msg.PutUint16(pBod.GetId())
-//   msg.PutUint32(spawnX)
-//   msg.PutUint32(spawnY)
-//   //s.push(&msg)
-
-//   log.Printf("Spawning %s at %d/%d -- %f/%f", player.GetName(), spawnX, spawnY, x, y)
-// }
-
 // Modify
 ///////////
 
@@ -189,6 +189,6 @@ func (s *Simulation) GetSeq() uint16 {
   return s.seq
 }
 
-func (s *Simulation) GetPlayerChan() chan interface{} {
+func (s *Simulation) GetPlayerChan() chan UDPMsg {
   return s.fromPlayers
 }
