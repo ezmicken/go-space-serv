@@ -40,3 +40,24 @@ func SeqToMillis(seq uint16, lastSync int64) int64 {
 func MillisToSeq(timestamp int64, lastSync int64) uint16 {
   return (uint16)((lastSync - timestamp) / GetConfiguredTimestep() * -1);
 }
+
+func BitOn(b byte, pos int) bool {
+  return (b & (1 << pos)) != 0;
+}
+
+func BitString(bytes []byte) string {
+  var dbg string = "["
+  for l := 0; l < len(bytes); l++ {
+    for m := 0; m < 8; m++ {
+      if BitOn(bytes[l], m) {
+        dbg += "1"
+      } else {
+        dbg += "0"
+      }
+    }
+    dbg += " "
+  }
+  dbg += "]"
+
+  return dbg
+}
