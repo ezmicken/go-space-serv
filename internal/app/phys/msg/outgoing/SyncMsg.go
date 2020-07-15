@@ -11,9 +11,9 @@ type SyncMsg struct {
   Time uint64
 }
 
-func (msg SyncMsg) GetCmd() UDPCmd { return SYNC }
-func (msg SyncMsg) Deserialize(bytes []byte) {}
-func (msg SyncMsg) Serialize(bytes []byte) {
+func (msg *SyncMsg) GetCmd() UDPCmd { return SYNC }
+func (msg *SyncMsg) GetSize() int { return 11 }
+func (msg *SyncMsg) Serialize(bytes []byte) {
   bytes[0] = byte(SYNC)
 
   binary.LittleEndian.PutUint16(bytes[1:3], msg.Seq)
@@ -21,4 +21,5 @@ func (msg SyncMsg) Serialize(bytes []byte) {
 
   return
 }
-func (msg SyncMsg) GetSize() int { return 11 }
+
+func (msg *SyncMsg) Deserialize(bytes []byte, head int) int { return head }
