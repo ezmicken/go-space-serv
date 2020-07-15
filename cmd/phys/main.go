@@ -17,7 +17,6 @@ import (
   "go-space-serv/internal/app/snet"
   "go-space-serv/internal/app/util"
   "go-space-serv/internal/app/world"
-  "go-space-serv/internal/app/phys"
 
   . "go-space-serv/internal/app/player/types"
   . "go-space-serv/internal/app/phys"
@@ -47,7 +46,7 @@ type physicsServer struct {
   pool                *goroutine.Pool
 
   players             Players
-  sim                 phys.Simulation
+  sim                 Simulation
   ipsToPlayers        sync.Map
 
   launchTime          int64
@@ -125,7 +124,7 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
   valid = valid && ps.ipIsValid(ipString)
 
   if valid {
-    bytes := append([]byte{}, data...)
+    bytes := data
     _ = ps.pool.Submit(func() {
       var player *UdpPlayer
       playerId, ok := ps.ipsToPlayers.Load(ipString)
