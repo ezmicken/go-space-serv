@@ -10,6 +10,8 @@ const (
   CHALLENGE
   WELCOME
   SYNC
-  SPAWN
+  ENTER
+  EXIT
+  MOVESHOOT
 )
 
