@@ -38,7 +38,7 @@ func (p *Players) GetPlayer(id string) *UdpPlayer {
 }
 
 // pass nil for playerId to send to all
-func (p *Players) AddMsg(msg interface{}, playerId string) {
+func (p *Players) AddMsg(msg UDPMsg, playerId string) {
   player := p.GetPlayer(playerId)
   if player != nil && player.GetState() >= CONNECTED {
     player.AddMsg(msg)
@@ -47,7 +47,7 @@ func (p *Players) AddMsg(msg interface{}, playerId string) {
   }
 }
 
-func (p *Players) AddMsgAll(msg *UDPMsg) {
+func (p *Players) AddMsgAll(msg UDPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
     player := value.(*UdpPlayer)
     if player.GetState() >= CONNECTED {

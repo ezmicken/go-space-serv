@@ -12,7 +12,6 @@ import (
   "go-space-serv/internal/app/util"
 
   . "go-space-serv/internal/app/phys/interface"
-  . "go-space-serv/internal/app/phys/msg"
   . "go-space-serv/internal/app/phys/types"
   . "go-space-serv/internal/app/player/types"
 )
@@ -59,8 +58,8 @@ type UdpPlayer struct {
   packetBufferEmpty bool
 
   connection        gnet.Conn
-  toSim             chan interface{}
-  toClient          chan interface{}
+  toSim             chan UDPMsg
+  toClient          chan UDPMsg
   state             UdpPlayerState
   stats             *PlayerStats
 }
@@ -80,7 +79,7 @@ func NewUdpPlayer(n string) *UdpPlayer {
   p.shutupRx = 0
   p.shutupTx = 0
 
-  p.toClient = make(chan interface{}, 100)
+  p.toClient = make(chan UDPMsg, 100)
 
   p.seqBuffer = make([]uint32, BUFFER_SIZE)
   p.packetData = make([]PacketData, BUFFER_SIZE)
@@ -89,7 +88,7 @@ func NewUdpPlayer(n string) *UdpPlayer {
   return &p
 }
 
-func (p *UdpPlayer) SetSimChan(ch chan interface{}) {
+func (p *UdpPlayer) SetSimChan(ch chan UDPMsg) {
   p.toSim = ch
 }
 
@@ -183,7 +182,6 @@ func (p *UdpPlayer) PackAndSend() {
     pd.Size = 1
     p.insertPacketData(pd, p.txSeq)
     p.packetBuffer[HEADER_SIZE] = byte(SHUTUP)
-    log.Printf("Sending SHUTUP to %s", p.name)
     p.packetBufferEmpty = true
     p.shutupTx++
     p.serializeHeader(header)
@@ -209,7 +207,7 @@ func (p *UdpPlayer) PackAndSend() {
     msg := tmp.(UDPMsg)
     msgSize := msg.GetSize()
     if p.packetBufferTail + msgSize >= int(BUFFER_SIZE) {
-      p.toClient <- &msg
+      p.toClient <- msg
       log.Printf("%s packetBuffer overflow.", p.name)
     }
 
@@ -218,8 +216,6 @@ func (p *UdpPlayer) PackAndSend() {
         p.packetBuffer[k] = p.packetBuffer[k-msgSize]
       }
     }
-
-    log.Printf("Sending %d", msg.GetCmd())
 
     p.txSeq++
     header.Seq = p.txSeq
@@ -246,7 +242,6 @@ func (p *UdpPlayer) Unpack(packet []byte) {
   tail = head
   msgLen := len(packet)
   if salt != (p.clientSalt ^ p.serverSalt) {
-    log.Printf("Rejecting packet with invalid salt from " + p.name)
     return
   }
 
@@ -264,8 +259,10 @@ func (p *UdpPlayer) Unpack(packet []byte) {
   }
 
   cmd := UDPCmd(packet[head])
+
   if cmd == SHUTUP {
     p.shutupRx++
+    return
   } else {
     p.shutupRx = 0
   }
@@ -274,24 +271,12 @@ func (p *UdpPlayer) Unpack(packet []byte) {
     p.rxSeq = seq
 
     for head < msgLen {
-      head++
-
-      // TODO: offload to interpreter
-      if cmd == SYNC {
-        log.Printf("Received SYNC(%d) request from %s", cmd, p.name)
-        msg := &CmdMsg{}
-        msg.SetCmd(cmd)
-        msg.SetPlayerId(p.name)
-        p.toSim <- msg
-        head += msg.GetSize()
-      }
-
-      tail = head
+      head = CreateAndPublishMsg(packet, head, p.toSim, p.name)
     }
   }
 }
 
-func (p *UdpPlayer) AddMsg(msg interface{}) {
+func (p *UdpPlayer) AddMsg(msg UDPMsg) {
   select {
   case p.toClient <- msg:
   default:
@@ -299,8 +284,8 @@ func (p *UdpPlayer) AddMsg(msg interface{}) {
   }
 }
 
-func (p *UdpPlayer) getMsg() interface{} {
-  var tmp interface{}
+func (p *UdpPlayer) getMsg() UDPMsg {
+  var tmp UDPMsg
   select {
   case tmp = <-p.toClient:
   default:
