@@ -212,7 +212,7 @@ func (p *UdpPlayer) PackAndSend() {
     }
 
     if !p.packetBufferEmpty {
-      for k := p.packetBufferTail + msgSize; k >= HEADER_SIZE; k-- {
+      for k := p.packetBufferTail + msgSize; k >= (HEADER_SIZE+msgSize); k-- {
         p.packetBuffer[k] = p.packetBuffer[k-msgSize]
       }
     }
