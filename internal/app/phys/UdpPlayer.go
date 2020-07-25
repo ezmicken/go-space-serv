@@ -193,7 +193,7 @@ func (p *UdpPlayer) PackAndSend() {
 
   // Move the tail based on newest ack
   p.packetBufferTail = HEADER_SIZE
-  for i := p.txSeq; i <= p.txAck; i-- {
+  for i := p.txSeq; i < p.txAck; i-- {
     pd := p.getPacketData(i)
     p.packetBufferTail += int(pd.Size)
   }
@@ -258,20 +258,22 @@ func (p *UdpPlayer) Unpack(packet []byte) {
     p.onPacketAcked(seq)
   }
 
-  cmd := UDPCmd(packet[head])
+  if (head < msgLen) {
+    cmd := UDPCmd(packet[head])
 
-  if cmd == SHUTUP {
-    p.shutupRx++
-    return
-  } else {
-    p.shutupRx = 0
-  }
+    if cmd == SHUTUP {
+      p.shutupRx++
+      return
+    } else {
+      p.shutupRx = 0
+    }
 
-  if seqGreaterThan(seq, p.rxSeq) {
-    p.rxSeq = seq
+    if seqGreaterThan(seq, p.rxSeq) {
+      p.rxSeq = seq
 
-    for head < msgLen {
-      head = CreateAndPublishMsg(packet, head, p.toSim, p.name)
+      for head < msgLen {
+        head = CreateAndPublishMsg(packet, head, p.toSim, p.name)
+      }
     }
   }
 }
