@@ -89,9 +89,16 @@ func (s *Simulation) processFrame(frameStart int64) {
             response.BodyId = pBod.GetId();
             response.X = uint32(spawnX)
             response.Y = uint32(spawnY)
-            s.players.AddMsg(&response, playerId)
+            s.players.AddMsgAll(&response)
         }
       case *MoveShootMsg:
+        msg := t
+        playerId := msg.GetPlayerId()
+        bod, ok := s.controlledBodies.Load(playerId)
+        if ok && bod != nil {
+          msg.BodyId = bod.(*UdpBody).GetId();
+          s.players.AddMsgExcluding(msg, playerId)
+        }
         break
       default:
     }
