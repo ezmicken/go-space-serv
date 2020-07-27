@@ -135,6 +135,7 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   var physMsg NetworkMsg
   physMsg.PutByte(byte(IJoin))
   physMsg.PutString(ctx.GetPlayerId())
+  physMsg.PutString(c.RemoteAddr().(*net.TCPAddr).IP.String());
   log.Printf("Sending connection event to physics");
   ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
 
