@@ -29,11 +29,6 @@ type UdpBody struct {
   yAcc float32
 }
 
-const LEFT byte = 1;
-const RIGHT byte = 2;
-const FORWARD byte = 3;
-const BACKWARD byte = 4;
-
 func (b *UdpBody) Serialize() []byte {
   var buf bytes.Buffer
 

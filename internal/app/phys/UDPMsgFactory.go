@@ -8,7 +8,7 @@ import(
 
 // TODO: pooling
 
-// Create msg, deserialize it, publish it, return size
+// Create msg, deserialize it, publish it, return new head
 func CreateAndPublishMsg(packet []byte, head int, target chan UDPMsg, playerId string) int {
   cmd := UDPCmd(packet[head])
   if cmd == SYNC {

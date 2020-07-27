@@ -147,10 +147,8 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
           if cmd == HELLO {
             log.Printf("Received HELLO");
             clientSalt := snet.Read_int64(bytes[5:13])
-            log.Printf("client salt: %d", clientSalt)
             player.SetClientSalt(clientSalt)
             serverSalt := rand.Int63()
-            log.Printf("server salt: %d", serverSalt)
             player.SetServerSalt(serverSalt)
             player.SetConnection(connection)
 
@@ -179,7 +177,6 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
             serverSalt := player.GetServerSalt()
             challengeResponse := snet.Read_int64(bytes[5:13])
             if challengeResponse == clientSalt ^ serverSalt {
-              log.Printf("SUCCESS");
               player.SetState(CONNECTED)
               player.SetSimChan(ps.sim.GetPlayerChan())
               log.Printf("%s passed challenge, welcoming.", ipString)
