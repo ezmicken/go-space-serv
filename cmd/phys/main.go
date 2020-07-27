@@ -66,8 +66,8 @@ func main() {
   // Populate config
   // TODO: take this from flags
   var config helpers.Config
-  config.TIMESTEP = 34
-  config.TIMESTEP_NANO = 34000000
+  config.TIMESTEP = 33
+  config.TIMESTEP_NANO = 33000000
   config.NAME = "SPACE-PHYS"
   config.VERSION = "0.0.1"
   config.PROTOCOL_ID = SDBMHash(config.NAME + config.VERSION)
