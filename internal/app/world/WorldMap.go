@@ -1,9 +1,6 @@
 package world
 
 import (
-  //"log"
-  //"bytes"
-
   "github.com/ojrac/opensimplex-go"
 
   ."go-space-serv/internal/app/world/types"
@@ -33,23 +30,17 @@ func (wm *WorldMap) Generate() {
     wm.blocks[i] = make([]BlockType, wm.W)
   }
 
-  //var b bytes.Buffer
-
   for y := 0; y < wm.H; y++ {
     for x := 0; x < wm.W; x++ {
       floatVal := noise.Eval2(float64(x) * 0.05, float64(y) * 0.05)
       if floatVal > 0.36 {
         wm.blocks[y][x] = SOLID
-        //b.WriteString("1")
       } else {
         wm.blocks[y][x] = EMPTY
-        //b.WriteString("0")
       }
     }
-    //b.WriteString("\n")
   }
 
-  //log.Printf(b.String())
   return
 }
 
