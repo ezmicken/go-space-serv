@@ -8,6 +8,9 @@ import (
   "math/rand"
   "encoding/binary"
   "sync"
+  "context"
+  "os"
+  "os/signal"
   //"runtime"
   //"runtime/debug"
 
@@ -26,7 +29,6 @@ import (
 
 const cmdLen            int     = 1
 const maxMsgSize        int     = 1024
-const udpAddr           string  = "udp://:9495";
 const udpPort           int     = 9495
 
 func SDBMHash(str string) uint32 {
@@ -44,6 +46,9 @@ func SDBMHash(str string) uint32 {
 type physicsServer struct {
   *gnet.EventServer
   pool                *goroutine.Pool
+  ctx                 context.Context
+  shutdown            bool
+  cancel              func()
 
   players             Players
   sim                 Simulation
@@ -95,14 +100,61 @@ func main() {
     tick: 8333333,
     launchTime: time.Now().UnixNano(),
     worldConn: conn,
+    shutdown: false,
   }
 
+  // Start listening for operating system signals
+  signalChan := make(chan os.Signal, 1)
+  shutdownChan := make(chan struct{})
+  worldChan := make(chan struct{})
+  signal.Notify(signalChan, os.Interrupt)
+  ps.ctx, ps.cancel = context.WithCancel(context.Background())
+  go sig(signalChan, ps.cancel)
+
   // react to events from world server
-  go ps.ReactWorld(conn)
+  go ps.ReactWorld(conn, worldChan)
 
   rand.Seed(time.Now().UnixNano())
 
-  log.Fatal(gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
+  go serve(ps, "udp://:9495", shutdownChan, ps.cancel)
+
+  // Wait for context to finish
+  <-ps.ctx.Done()
+  conn.Close()
+
+  // Let Tick() tell the server to shut down
+  log.Printf("Shutting down...")
+  ps.shutdown = true;
+
+  // Let the server finish shutting down
+  <-shutdownChan
+  <-worldChan
+
+  log.Printf("Goodbye, World.")
+}
+
+func serve(ps *physicsServer, udpAddr string, shutdownChan chan struct{}, cancel func()) {
+  log.Printf("Listening to %s", udpAddr)
+  err := gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
+  if err != nil {
+    log.Fatal(err)
+  }
+  cancel()
+  close(shutdownChan)
+}
+
+func sig(c chan os.Signal, cancel func()) {
+  oscall := <-c
+  log.Printf("system call: %+v", oscall)
+  cancel()
+}
+
+func (ps *physicsServer) Tick() (delay time.Duration, action gnet.Action) {
+  delay = ps.tick
+  if (ps.shutdown) {
+    action = gnet.Shutdown
+  }
+  return
 }
 
 func (ps *physicsServer) ipIsValid(ip string) bool {
@@ -212,7 +264,7 @@ func (ps *physicsServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
 }
 
 // world server <-> physics server interaction
-func (ps *physicsServer) ReactWorld(c net.Conn) {
+func (ps *physicsServer) ReactWorld(c net.Conn, endChan chan struct{}) {
 
   const(
     readingSize byte = iota
@@ -230,109 +282,119 @@ func (ps *physicsServer) ReactWorld(c net.Conn) {
   reader := bufio.NewReader(c)
 
   for {
-    switch state {
-      case readingSize:
-        sizeBytes, err := reader.Peek(4)
-        if err == nil {
-          size = snet.Read_int32(sizeBytes)
-          mapBuf = make([]byte, size - 4 - 4)
+    select {
+    case <-ps.ctx.Done():
+      log.Printf("Closing world connection...")
+      c.Close()
+      close(endChan)
+      return
+    default:
+      switch state {
+        case readingSize:
+          sizeBytes, err := reader.Peek(4)
+          if err == nil {
+            size = snet.Read_int32(sizeBytes)
+            mapBuf = make([]byte, size - 4 - 4)
 
-          reader.Discard(4)
+            reader.Discard(4)
 
-          state = readingWidth
-          log.Printf("Read worldMap data length=%d", size)
-        } else {
-          log.Printf(err.Error())
-        }
-      case readingWidth:
-        widthBytes, err := reader.Peek(4)
-        if err == nil {
-          ps.worldMap.W = snet.Read_int32(widthBytes)
-
-          reader.Discard(4)
-
-          state = readingHeight
-          log.Printf("Read worldMap width=%d", ps.worldMap.W)
-        } else {
-          log.Printf(err.Error())
-        }
-      case readingHeight:
-        heightBytes, err := reader.Peek(4)
-        if err == nil {
-          ps.worldMap.H = snet.Read_int32(heightBytes)
-
-          reader.Discard(4)
-
-          state = readingResolution
-          log.Printf("Read worldMap height=%d", ps.worldMap.H)
-        } else {
-          log.Printf(err.Error())
-        }
-      case readingResolution:
-        resBytes, err := reader.Peek(1)
-        if err == nil {
-          ps.worldMap.Resolution = int(resBytes[0])
-
-          reader.Discard(1)
-
-          state = readingMap
-          log.Printf("Read worldMap resolution=%d", ps.worldMap.Resolution)
-        } else {
-          log.Printf(err.Error())
-        }
-      case readingMap:
-        for b, err := reader.Peek(1); err == nil && mapBufRead < size - 4 - 4 - 1; {
-          mapBuf[mapBufRead] = b[0]
-          mapBufRead++
-          reader.Discard(1)
-        }
-
-        if mapBufRead == size - 4 - 4 - 1 {
-          ps.worldMap.Deserialize(mapBuf, false)
-
-          reader.Reset(c)
-
-          state = readingEvent
-          log.Printf("Read worldMap bytes")
-
-          var msg NetworkMsg
-          msg.PutByte(byte(IReady))
-          msg.PutUint32(udpPort)
-          c.Write(snet.GetDataFromNetworkMsg(&msg))
-
-          ps.sim.Start(&ps.worldMap, &ps.players);
-        }
-      case readingEvent:
-        eventSizeBytes, err := reader.Peek(4)
-        if err == nil {
-          log.Printf("Received event from world")
-          eventSize := snet.Read_int32(eventSizeBytes)
-          reader.Discard(4)
-
-          eventContent, err2 := reader.Peek(eventSize)
-          if err2 == nil {
-            if eventContent[0] == byte(IJoin) {
-              playerIdLenBytes := eventContent[1:3]
-              playerIdLen := snet.Read_uint16(playerIdLenBytes)
-              playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
-              ipLen := snet.Read_uint16(eventContent[3+playerIdLen:3+playerIdLen+2])
-              ipString := snet.Read_utf8(eventContent[3+playerIdLen+2:3+playerIdLen+2+ipLen])
-              ps.players.Add(playerId, NewPlayerStats())
-              log.Printf("Storing %s <-> %s", ipString, playerId)
-              ps.ipsToPlayers.Store(ipString, playerId);
-            } else if eventContent[0] == byte(ILeave) {
-              playerIdLenBytes := eventContent[1:3]
-              playerIdLen := snet.Read_uint16(playerIdLenBytes)
-              playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
-              ps.players.Remove(playerId)
-              ps.sim.RemoveControlledBody(playerId)
-            }
+            state = readingWidth
+            log.Printf("Read worldMap data length=%d", size)
+          } else {
+            log.Printf(err.Error())
           }
-          reader.Discard(eventSize)
-        } else {
-          log.Printf("%s", err.Error())
-        }
+        case readingWidth:
+          widthBytes, err := reader.Peek(4)
+          if err == nil {
+            ps.worldMap.W = snet.Read_int32(widthBytes)
+
+            reader.Discard(4)
+
+            state = readingHeight
+            log.Printf("Read worldMap width=%d", ps.worldMap.W)
+          } else {
+            log.Printf(err.Error())
+          }
+        case readingHeight:
+          heightBytes, err := reader.Peek(4)
+          if err == nil {
+            ps.worldMap.H = snet.Read_int32(heightBytes)
+
+            reader.Discard(4)
+
+            state = readingResolution
+            log.Printf("Read worldMap height=%d", ps.worldMap.H)
+          } else {
+            log.Printf(err.Error())
+          }
+        case readingResolution:
+          resBytes, err := reader.Peek(1)
+          if err == nil {
+            ps.worldMap.Resolution = int(resBytes[0])
+
+            reader.Discard(1)
+
+            state = readingMap
+            log.Printf("Read worldMap resolution=%d", ps.worldMap.Resolution)
+          } else {
+            log.Printf(err.Error())
+          }
+        case readingMap:
+          for b, err := reader.Peek(1); err == nil && mapBufRead < size - 4 - 4 - 1; {
+            mapBuf[mapBufRead] = b[0]
+            mapBufRead++
+            reader.Discard(1)
+          }
+
+          if mapBufRead == size - 4 - 4 - 1 {
+            ps.worldMap.Deserialize(mapBuf, false)
+
+            reader.Reset(c)
+
+            state = readingEvent
+            log.Printf("Read worldMap bytes")
+
+            var msg NetworkMsg
+            msg.PutByte(byte(IReady))
+            msg.PutUint32(udpPort)
+            c.Write(snet.GetDataFromNetworkMsg(&msg))
+
+            ps.sim.Start(&ps.worldMap, &ps.players);
+          }
+        case readingEvent:
+          eventSizeBytes, err := reader.Peek(4)
+          if err == nil {
+            log.Printf("Received event from world")
+            eventSize := snet.Read_int32(eventSizeBytes)
+            reader.Discard(4)
+
+            eventContent, err2 := reader.Peek(eventSize)
+            if err2 == nil {
+              if eventContent[0] == byte(IJoin) {
+                playerIdLenBytes := eventContent[1:3]
+                playerIdLen := snet.Read_uint16(playerIdLenBytes)
+                playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
+                ipLen := snet.Read_uint16(eventContent[3+playerIdLen:3+playerIdLen+2])
+                ipString := snet.Read_utf8(eventContent[3+playerIdLen+2:3+playerIdLen+2+ipLen])
+                ps.players.Add(playerId, NewPlayerStats())
+                log.Printf("Storing %s <-> %s", ipString, playerId)
+                ps.ipsToPlayers.Store(ipString, playerId);
+              } else if eventContent[0] == byte(ILeave) {
+                playerIdLenBytes := eventContent[1:3]
+                playerIdLen := snet.Read_uint16(playerIdLenBytes)
+                playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
+                ps.players.Remove(playerId)
+                ps.sim.RemoveControlledBody(playerId)
+              } else if eventContent[0] == byte(IShutdown) {
+                ps.cancel()
+              }
+            }
+            reader.Discard(eventSize)
+          } else {
+            log.Printf("%s", err.Error())
+          }
+      }
+      time.Sleep(1 * time.Second)
     }
-    time.Sleep(1 * time.Second)
   }
 }

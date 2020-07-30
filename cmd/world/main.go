@@ -5,6 +5,9 @@ import (
   "sync"
   "time"
   "net"
+  "context"
+  "os"
+  "os/signal"
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
@@ -30,6 +33,9 @@ type worldServer struct {
   physicsIP        net.IP
   physicsPort      int
   worldMap         *world.WorldMap
+
+  ctx              context.Context
+  shutdown         bool
 }
 
 // protocol constants
@@ -42,7 +48,6 @@ const blockLen int = 9
 const maxMsgSize int = 4096
 const maxBlocksPerMsg = (maxMsgSize - prefixLen - cmdLen) / blockLen
 
-var tcpPort = "tcp://:9494";
 var spawnX int = 500;
 var spawnY int = 500;
 var viewSize = 50; // todo: make this a player stat
@@ -283,6 +288,12 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
 }
 
 func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
+  delay = ws.tick
+  if ws.shutdown {
+    action = gnet.Shutdown
+    return
+  }
+
   if ws.state == RUNNING {
     ws.players.Range(func(key, value interface{}) bool {
       addr := key.(string)
@@ -299,7 +310,7 @@ func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
       return true
     })
   }
-  delay = ws.tick
+
   return
 }
 
@@ -332,8 +343,49 @@ func main() {
     tick: 100000000,
     state: WAIT_PHYS,
     worldMap: &wm,
+    shutdown: false,
   }
 
-  log.Printf("Listening to TCP on port %s", tcpPort)
-  log.Fatal(gnet.Serve(ws, tcpPort, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true)))
+  // Start listening for operating system signals
+  signalChan := make(chan os.Signal, 1)
+  shutdownChan := make(chan struct{})
+  signal.Notify(signalChan, os.Interrupt)
+  ctx, cancel := context.WithCancel(context.Background())
+  ws.ctx = ctx
+  go sig(signalChan, cancel)
+
+  // Start the server
+  go serve(ws, "tcp://:9494", shutdownChan, cancel)
+
+  // Wait for context to finish
+  <-ctx.Done()
+
+  // Let Tick() return the Shutdown gnet.Action
+  log.Printf("Shutting down...")
+  ws.shutdown = true
+  ws.physics.SendTo([]byte{1, 0, 0, 0, byte(IShutdown)})
+  ws.physics.Close()
+
+  // Wait for the server to finish shutting down
+  <-shutdownChan
+
+  log.Printf("Goodbye, World.")
+}
+
+func serve(ws *worldServer, tcpAddr string, shutdownChan chan struct{}, cancel func()) {
+  log.Printf("Listening to %s", tcpAddr)
+
+  err := gnet.Serve(ws, tcpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
+  if err != nil {
+    log.Fatal(err)
+  }
+
+  cancel()
+  close(shutdownChan)
+}
+
+func sig(c chan os.Signal, cancel func()) {
+  oscall := <-c
+  log.Printf("system call: %+v", oscall)
+  cancel()
 }

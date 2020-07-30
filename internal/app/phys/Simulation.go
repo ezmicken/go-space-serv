@@ -26,7 +26,7 @@ type Simulation struct {
   lastFrame           int64  // unix nanos since the last simulation frame
   framesSinceLastSync int64  // simulation frames since last sync
 
-  fromPlayers chan UDPMsg // incoming msgs from clients (UdpPlayer)
+  fromPlayers chan    UDPMsg // incoming msgs from clients (UdpPlayer)
 }
 
 func (s *Simulation) Start(worldMap *world.WorldMap, players *Players) {

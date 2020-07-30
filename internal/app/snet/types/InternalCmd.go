@@ -8,4 +8,5 @@ const(
   IReady InternalCmd = iota + 1
   IJoin
   ILeave
+  IShutdown
 )
