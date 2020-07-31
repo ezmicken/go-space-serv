@@ -20,22 +20,26 @@ import (
   "go-space-serv/internal/app/world"
   "go-space-serv/internal/app/snet"
   . "go-space-serv/internal/app/snet/types"
-  . "go-space-serv/internal/app/world/types"
 )
 
 type worldServer struct {
   *gnet.EventServer
-  pool            *goroutine.Pool
-  tick             time.Duration
-  players          sync.Map
-  state            ServerState
-  physics          gnet.Conn
-  physicsIP        net.IP
-  physicsPort      int
-  worldMap         *world.WorldMap
 
-  ctx              context.Context
-  shutdown         bool
+  pool              *goroutine.Pool
+  tick              time.Duration
+  players           sync.Map
+  state             ServerState
+  physics           gnet.Conn
+  physicsIP         net.IP
+  physicsPort       int
+  worldMap          *world.WorldMap
+
+  // lifecycle
+  ctx               context.Context
+  lifeWG            sync.WaitGroup
+  life        chan  struct{}
+  cancel            func()
+  physicsOpen       bool
 }
 
 // protocol constants
@@ -189,8 +193,9 @@ func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
 
 func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
   ws.physics = c
+  ws.physicsOpen = true
   ws.physicsIP = snet.GetOutboundIP()
-  ws.state = SETUP_PHYS
+  ws.state = SETUP
   log.Printf("Physics server connected.")
 
   // send physics server the map details
@@ -212,10 +217,10 @@ func (ws *worldServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
       } else {
         action = gnet.Close
       }
-    case SETUP_PHYS:
+    case SETUP:
       // deny connections
       action = gnet.Close
-    case RUNNING:
+    case ALIVE:
       // accept connections
       ws.initPlayerConnection(c)
     case SHUTDOWN:
@@ -238,6 +243,8 @@ func (ws *worldServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 
   if !isPhysicsConnection(c) {
     ws.closePlayerConnection(c);
+  } else {
+    ws.physicsOpen = false
   }
 
   ws.players.Delete(c.RemoteAddr().String())
@@ -249,14 +256,14 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
   //data := append([]byte{}, c.Read()...)
   if isPhysicsConnection(c) {
     _ = ws.pool.Submit(func() {
-      if ws.state == SETUP_PHYS && len(data) >= 4 {
+      if ws.state == SETUP && len(data) >= 4 {
         if (len(data) >= 4) {
           msg := snet.GetNetworkMsgFromData(data)
           if msg != nil {
             c.ResetBuffer()
             if msg.Data[0] == byte(IReady) {
               ws.physicsPort = snet.Read_int32(msg.Data[1:])
-              ws.state = RUNNING
+              ws.state = ALIVE
               log.Printf("Accepting player connections...")
             }
           }
@@ -287,14 +294,14 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
   return
 }
 
+func (ws *worldServer) OnShutdown(s gnet.Server) {
+  ws.lifeWG.Done()
+}
+
 func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
   delay = ws.tick
-  if ws.shutdown {
-    action = gnet.Shutdown
-    return
-  }
 
-  if ws.state == RUNNING {
+  if ws.state == ALIVE {
     ws.players.Range(func(key, value interface{}) bool {
       addr := key.(string)
       plr := value.(*world.TCPPlayer)
@@ -343,49 +350,44 @@ func main() {
     tick: 100000000,
     state: WAIT_PHYS,
     worldMap: &wm,
-    shutdown: false,
   }
 
-  // Start listening for operating system signals
-  signalChan := make(chan os.Signal, 1)
-  shutdownChan := make(chan struct{})
-  signal.Notify(signalChan, os.Interrupt)
-  ctx, cancel := context.WithCancel(context.Background())
-  ws.ctx = ctx
-  go sig(signalChan, cancel)
+  ws.ctx, ws.cancel = context.WithCancel(context.Background())
+  ws.life = make(chan struct{})
+  go ws.sig()
+  go ws.live()
 
-  // Start the server
-  go serve(ws, "tcp://:9494", shutdownChan, cancel)
-
-  // Wait for context to finish
-  <-ctx.Done()
-
-  // Let Tick() return the Shutdown gnet.Action
+  <-ws.ctx.Done()
   log.Printf("Shutting down...")
-  ws.shutdown = true
-  ws.physics.SendTo([]byte{1, 0, 0, 0, byte(IShutdown)})
-  ws.physics.Close()
+  ws.lifeWG.Add(1)
+  ws.state = SHUTDOWN
+  <-ws.life
 
-  // Wait for the server to finish shutting down
-  <-shutdownChan
-
-  log.Printf("Goodbye, World.")
+  log.Printf("end")
 }
 
-func serve(ws *worldServer, tcpAddr string, shutdownChan chan struct{}, cancel func()) {
-  log.Printf("Listening to %s", tcpAddr)
+func (ws *worldServer) live() {
+  ws.lifeWG.Add(1)
+  go func() {
+    err := gnet.Serve(ws, "tcp://:9494", gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
+    if err != nil {
+      log.Fatal(err)
+    }
+    log.Printf("server finish")
+    ws.lifeWG.Done()
+  }()
 
-  err := gnet.Serve(ws, tcpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
-  if err != nil {
-    log.Fatal(err)
-  }
-
-  cancel()
-  close(shutdownChan)
+  ws.lifeWG.Wait()
+  ws.state = DEAD
+  ws.cancel()
+  close(ws.life)
 }
 
-func sig(c chan os.Signal, cancel func()) {
-  oscall := <-c
+func (ws *worldServer) sig() {
+  signalChan := make(chan os.Signal, 1)
+  signal.Notify(signalChan, os.Interrupt)
+
+  oscall := <-signalChan
   log.Printf("system call: %+v", oscall)
-  cancel()
+  ws.cancel()
 }
