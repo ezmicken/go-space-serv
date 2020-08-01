@@ -13,7 +13,7 @@ type Players struct {
 	playerMap sync.Map
 }
 
-func (p *Players) Add(id string, stats *PlayerStats) {
+func (p *Players) Add(id string, stats *PlayerStats) *UdpPlayer {
 	player := NewUdpPlayer(id)
 	player.SetStats(stats)
 
@@ -21,6 +21,8 @@ func (p *Players) Add(id string, stats *PlayerStats) {
   if !exists {
     p.Count += 1
   }
+
+  return player
 }
 
 func (p *Players) Remove(id string) {

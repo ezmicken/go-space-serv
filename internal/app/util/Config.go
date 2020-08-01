@@ -6,6 +6,7 @@ type Config struct {
   NAME string
   VERSION string
   PROTOCOL_ID uint32
+  MAX_MSG_SIZE int
 }
 
 var configInstance *Config

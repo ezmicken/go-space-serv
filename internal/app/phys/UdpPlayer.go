@@ -3,6 +3,7 @@ package phys
 import (
   "log"
   "math"
+  "math/rand"
   "time"
   "encoding/binary"
 
@@ -88,42 +89,6 @@ func NewUdpPlayer(n string) *UdpPlayer {
   return &p
 }
 
-func (p *UdpPlayer) SetSimChan(ch chan UDPMsg) {
-  p.toSim = ch
-}
-
-// Sends a packet every rate milliseconds count times
-func (p *UdpPlayer) SendRepeating(msg []byte, rate, count int) {
-  if p.spamChan != nil {
-    close(p.spamChan)
-  }
-
-  log.Printf("sending first %d", msg[4])
-  p.connection.SendTo(msg)
-
-  // Use a local reference to the chan
-  // for the case where it was closed
-  // and re-opened during Sleep
-  thisChan := make(chan struct{})
-  p.spamChan = thisChan
-
-  go func() {
-    for i := 0; i < count; i++ {
-      _, open := <-thisChan
-      if !open {
-        return
-      }
-
-      log.Printf("sending %d (iteration %d)", msg[4], i)
-      p.connection.SendTo(msg)
-      time.Sleep(time.Duration(rate) * time.Millisecond)
-    }
-
-    log.Printf("Player.SendRepeating finished all iterations.")
-    close(thisChan)
-  }()
-}
-
 // Compares two sequence values and their difference.
 func seqGreaterThan(s1 uint16, s2 uint16) bool {
   return ((s1 > s2) && (s1-s2 <= 32768)) || ((s1 < s2) && (s2-s1 > 32768))
@@ -149,11 +114,90 @@ func (p *UdpPlayer) onPacketAcked(seq uint16) {
   // TODO: calculate exponential moving average RTT
 }
 
-func (p *UdpPlayer) serializeHeader(header UDPHeader) {
-  binary.LittleEndian.PutUint32(p.packetBuffer[:4], header.ProtocolId)
-  binary.LittleEndian.PutUint64(p.packetBuffer[4:12], uint64(header.Salt))
-  binary.LittleEndian.PutUint16(p.packetBuffer[12:14], header.Seq)
-  binary.LittleEndian.PutUint16(p.packetBuffer[14:16], header.Ack)
+func (p *UdpPlayer) getMsg() UDPMsg {
+  var tmp UDPMsg
+  select {
+  case tmp = <-p.toClient:
+  default:
+    return nil
+  }
+
+  return tmp
+}
+
+// Sends a packet every rate milliseconds count times
+func (p *UdpPlayer) sendRepeating(msg []byte, rate, count int) {
+  if p.spamChan != nil {
+    close(p.spamChan)
+  }
+
+  log.Printf("sending first %d", msg[4])
+  p.connection.SendTo(msg)
+
+  // Use a local reference to the chan
+  // for the case where it was closed
+  // and re-opened during Sleep
+  thisChan := make(chan struct{})
+  p.spamChan = thisChan
+
+  go func() {
+    for i := 0; i < count; i++ {
+      _, open := <-thisChan
+      if !open {
+        return
+      }
+
+      log.Printf("sending %d (iteration %d)", msg[4], i)
+      p.connection.SendTo(msg)
+      time.Sleep(time.Duration(rate) * time.Millisecond)
+    }
+
+    log.Printf("Player.sendRepeating finished all iterations.")
+    close(thisChan)
+  }()
+}
+
+func (p *UdpPlayer) unpack(packet []byte) {
+  head := 8
+  tail := 0
+  salt := snet.Read_int64(packet[tail:head])
+  tail = head
+  msgLen := len(packet)
+  if salt != (p.clientSalt ^ p.serverSalt) {
+    return
+  }
+
+  // handle seq/ack
+  head += 2
+  seq := snet.Read_uint16(packet[tail:head])
+  tail = head
+  head += 2
+  ack := snet.Read_uint16(packet[tail:head])
+  tail = head
+
+  if seqGreaterThan(ack, p.txAck) {
+    p.txAck = ack
+    p.onPacketAcked(seq)
+  }
+
+  if (head < msgLen) {
+    cmd := UDPCmd(packet[head])
+
+    if cmd == SHUTUP {
+      p.shutupRx++
+      return
+    } else {
+      p.shutupRx = 0
+    }
+
+    if seqGreaterThan(seq, p.rxSeq) {
+      p.rxSeq = seq
+
+      for head < msgLen {
+        head = CreateAndPublishMsg(packet, head, p.toSim, p.name)
+      }
+    }
+  }
 }
 
 func (p *UdpPlayer) PackAndSend() {
@@ -184,7 +228,7 @@ func (p *UdpPlayer) PackAndSend() {
     p.packetBuffer[HEADER_SIZE] = byte(SHUTUP)
     p.packetBufferEmpty = true
     p.shutupTx++
-    p.serializeHeader(header)
+    header.Serialize(p.packetBuffer)
     p.connection.SendTo(p.packetBuffer[:HEADER_SIZE+1])
     return
   } else {
@@ -231,51 +275,68 @@ func (p *UdpPlayer) PackAndSend() {
     msg = nil
   }
 
-  p.serializeHeader(header)
+  header.Serialize(p.packetBuffer)
   p.connection.SendTo(p.packetBuffer[:p.packetBufferTail])
 }
 
-func (p *UdpPlayer) Unpack(packet []byte) {
-  head := 8
-  tail := 0
-  salt := snet.Read_int64(packet[tail:head])
-  tail = head
-  msgLen := len(packet)
-  if salt != (p.clientSalt ^ p.serverSalt) {
+func (p *UdpPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
+  // Respond to HELLO with CHALLENGE
+  if p.state == DISCONNECTED {
+    // enforce padding to avoid participating in DDoS minification
+    if len(bytes) != helpers.GetConfig().MAX_MSG_SIZE {
+      log.Printf("Rejecting packet due to lack of padding.")
+      return
+    }
+
+    cmd := UDPCmd(bytes[4])
+    if cmd == HELLO {
+      log.Printf("Received HELLO");
+      p.clientSalt = snet.Read_int64(bytes[5:13])
+      p.serverSalt = rand.Int63()
+      p.connection = conn
+
+      msgBytes := make([]byte, helpers.GetConfig().MAX_MSG_SIZE)
+      binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
+      msgBytes[4] = byte(CHALLENGE)
+      binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(p.clientSalt))
+      binary.LittleEndian.PutUint64(msgBytes[13:21], uint64(p.serverSalt))
+      p.sendRepeating(msgBytes, 500, 20)
+      p.state = CHALLENGED
+    }
+
+    return
+  }
+  if p.state == CHALLENGED {
+    // enforce padding to avoid participating in DDoS minification
+    if len(bytes) != helpers.GetConfig().MAX_MSG_SIZE {
+      log.Printf("Rejecting packet due to lack of padding.")
+      return
+    }
+
+    cmd := UDPCmd(bytes[4])
+    if cmd == CHALLENGE {
+      log.Printf("Received CHALLENGE");
+      challengeResponse := snet.Read_int64(bytes[5:13])
+      if challengeResponse == p.clientSalt ^ p.serverSalt {
+        p.state = CONNECTED
+        log.Printf("%s is welcome.", p.name)
+        msgBytes := make([]byte, 13)
+        binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
+        msgBytes[4] = byte(WELCOME)
+        binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(p.clientSalt ^ p.serverSalt))
+        p.sendRepeating(msgBytes, 500, 20)
+        p.state = SPECTATING
+      } else {
+        log.Printf("%s failed challenge with %d", p.clientSalt ^ p.serverSalt)
+      }
+    }
+
     return
   }
 
-  // handle seq/ack
-  head += 2
-  seq := snet.Read_uint16(packet[tail:head])
-  tail = head
-  head += 2
-  ack := snet.Read_uint16(packet[tail:head])
-  tail = head
-
-  if seqGreaterThan(ack, p.txAck) {
-    p.txAck = ack
-    p.onPacketAcked(seq)
-  }
-
-  if (head < msgLen) {
-    cmd := UDPCmd(packet[head])
-
-    if cmd == SHUTUP {
-      p.shutupRx++
-      return
-    } else {
-      p.shutupRx = 0
-    }
-
-    if seqGreaterThan(seq, p.rxSeq) {
-      p.rxSeq = seq
-
-      for head < msgLen {
-        head = CreateAndPublishMsg(packet, head, p.toSim, p.name)
-      }
-    }
-  }
+  // state == CONNECTED
+  p.unpack(bytes[4:])
+  return;
 }
 
 func (p *UdpPlayer) AddMsg(msg UDPMsg) {
@@ -286,15 +347,8 @@ func (p *UdpPlayer) AddMsg(msg UDPMsg) {
   }
 }
 
-func (p *UdpPlayer) getMsg() UDPMsg {
-  var tmp UDPMsg
-  select {
-  case tmp = <-p.toClient:
-  default:
-    return nil
-  }
-
-  return tmp
+func (p *UdpPlayer) SetSimChan(ch chan UDPMsg) {
+  p.toSim = ch
 }
 
 func (p *UdpPlayer) GetName() string {

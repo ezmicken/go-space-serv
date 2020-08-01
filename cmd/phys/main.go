@@ -6,7 +6,6 @@ import (
   "net"
   "bufio"
   "math/rand"
-  "encoding/binary"
   "sync"
   "context"
   "os"
@@ -23,12 +22,10 @@ import (
 
   . "go-space-serv/internal/app/player/types"
   . "go-space-serv/internal/app/phys"
-  . "go-space-serv/internal/app/phys/types"
   . "go-space-serv/internal/app/snet/types"
 )
 
 const cmdLen            int     = 1
-const maxMsgSize        int     = 1024
 const udpPort           int     = 9495
 
 func SDBMHash(str string) uint32 {
@@ -81,6 +78,7 @@ func main() {
   config.NAME = "SPACE-PHYS"
   config.VERSION = "0.0.1"
   config.PROTOCOL_ID = SDBMHash(config.NAME + config.VERSION)
+  config.MAX_MSG_SIZE = 1024
   helpers.SetConfig(&config)
 
   log.Printf("PROTOCOL_ID: %d", config.PROTOCOL_ID)
@@ -279,7 +277,10 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
                 playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
                 ipLen := snet.Read_uint16(eventContent[3+playerIdLen:3+playerIdLen+2])
                 ipString := snet.Read_utf8(eventContent[3+playerIdLen+2:3+playerIdLen+2+ipLen])
-                ps.players.Add(playerId, NewPlayerStats())
+                player := ps.players.Add(playerId, NewPlayerStats())
+                if player != nil {
+                  player.SetSimChan(ps.sim.GetPlayerChan())
+                }
                 log.Printf("Storing %s <-> %s", ipString, playerId)
                 ps.ipsToPlayers.Store(ipString, playerId);
               } else if eventContent[0] == byte(ILeave) {
@@ -307,6 +308,21 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
   }
 }
 
+func (ps *physicsServer) ipIsValid(ip string) bool {
+  found := false
+  ps.ipsToPlayers.Range(func(key, value interface{}) bool {
+    if key.(string) == ip {
+      found = true
+      return false
+    }
+    return true
+  })
+
+  return found
+}
+
+// Event Handler
+
 func (ps *physicsServer) OnShutdown(srv gnet.Server) {
   if ps.worldConnOpen == true {
     log.Printf("IShutdown -> world")
@@ -327,19 +343,6 @@ func (ps *physicsServer) Tick() (delay time.Duration, action gnet.Action) {
   return
 }
 
-func (ps *physicsServer) ipIsValid(ip string) bool {
-  found := false
-  ps.ipsToPlayers.Range(func(key, value interface{}) bool {
-    if key.(string) == ip {
-      found = true
-      return false
-    }
-    return true
-  })
-
-  return found
-}
-
 func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, action gnet.Action) {
   valid := true
   ipString := connection.RemoteAddr().(*net.UDPAddr).IP.String()
@@ -356,68 +359,7 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
 
       valid = valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId()
       if valid && player != nil {
-
-        // Respond to HELLO with CHALLENGE
-        if player.GetState() == DISCONNECTED {
-          // enforce padding to avoid participating in DDoS minification
-          if len(bytes) != maxMsgSize {
-            log.Printf("Rejecting packet due to lack of padding.")
-            return
-          }
-
-          cmd := UDPCmd(bytes[4])
-          if cmd == HELLO {
-            log.Printf("Received HELLO");
-            clientSalt := snet.Read_int64(bytes[5:13])
-            player.SetClientSalt(clientSalt)
-            serverSalt := rand.Int63()
-            player.SetServerSalt(serverSalt)
-            player.SetConnection(connection)
-
-            msgBytes := make([]byte, maxMsgSize)
-            binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
-            msgBytes[4] = byte(CHALLENGE)
-            binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(clientSalt))
-            binary.LittleEndian.PutUint64(msgBytes[13:21], uint64(serverSalt))
-            player.SendRepeating(msgBytes, 500, 20)
-            player.SetState(CHALLENGED)
-          }
-
-          return
-        }
-        if player.GetState() == CHALLENGED {
-          // enforce padding to avoid participating in DDoS minification
-          if len(bytes) != maxMsgSize {
-            log.Printf("Rejecting packet due to lack of padding.")
-            return
-          }
-
-          cmd := UDPCmd(bytes[4])
-          if cmd == CHALLENGE {
-            log.Printf("Received CHALLENGE");
-            clientSalt := player.GetClientSalt()
-            serverSalt := player.GetServerSalt()
-            challengeResponse := snet.Read_int64(bytes[5:13])
-            if challengeResponse == clientSalt ^ serverSalt {
-              player.SetState(CONNECTED)
-              player.SetSimChan(ps.sim.GetPlayerChan())
-              log.Printf("%s passed challenge, welcoming.", ipString)
-              msgBytes := make([]byte, 13)
-              binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
-              msgBytes[4] = byte(WELCOME)
-              binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(clientSalt ^ serverSalt))
-              player.SendRepeating(msgBytes, 500, 20)
-              player.SetState(SPECTATING)
-            } else {
-              log.Printf("%s failed challenge with %d", clientSalt ^ serverSalt)
-            }
-          }
-
-          return
-        }
-
-        // state == CONNECTED
-        player.Unpack(bytes[4:])
+        player.PacketReceive(bytes, connection)
       }
     })
   } else {
