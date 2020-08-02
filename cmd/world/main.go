@@ -99,12 +99,12 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
     if p.GetPlayerId() != playerId {
       connectedMsg := new(tcp.NetworkMsg)
       connectedMsg.PutByte(byte(snet.SPlayerJoin))
-      connectedMsg.PutString(playerId)
-      stats = plr.GetPlayerStats()
+      connectedMsg.PutString(p.GetPlayerId())
+      stats = p.GetPlayerStats()
       connectedMsg.PutFloat32(stats.Thrust)
       connectedMsg.PutFloat32(stats.MaxSpeed)
       connectedMsg.PutFloat32(stats.Rotation)
-      p.AddMsg(connectedMsg)
+      plr.AddMsg(connectedMsg)
     }
 
     return true
