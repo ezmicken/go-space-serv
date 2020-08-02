@@ -1,7 +1,7 @@
-package phys
+package msg
 
 import(
-  . "go-space-serv/internal/app/phys/types"
+  "go-space-serv/internal/space/snet/udp"
 )
 
 type CmdMsg struct {
@@ -9,17 +9,17 @@ type CmdMsg struct {
   playerId string
 
   // sent
-  cmd UDPCmd
+  cmd udp.UDPCmd
 }
 
 // UDPMsg interface
 func (msg *CmdMsg) Deserialize(packet []byte, head int) int {
-  msg.cmd = UDPCmd(packet[head])
+  msg.cmd = udp.UDPCmd(packet[head])
   return head+1
 }
 
 func (msg *CmdMsg) GetSize() int { return 1 }
-func (msg *CmdMsg) GetCmd() UDPCmd { return msg.cmd }
+func (msg *CmdMsg) GetCmd() udp.UDPCmd { return msg.cmd }
 
 func (msg *CmdMsg) SetPlayerId(id string) { msg.playerId = id }
 func (msg *CmdMsg) GetPlayerId() string { return msg.playerId }

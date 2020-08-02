@@ -16,13 +16,13 @@ import (
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
 
-  "go-space-serv/internal/app/snet"
-  "go-space-serv/internal/app/util"
-  "go-space-serv/internal/app/world"
-
-  . "go-space-serv/internal/app/player/types"
-  . "go-space-serv/internal/app/phys"
-  . "go-space-serv/internal/app/snet/types"
+  "go-space-serv/internal/space/snet"
+  "go-space-serv/internal/space/snet/udp"
+  "go-space-serv/internal/space/snet/tcp"
+  "go-space-serv/internal/space/util"
+  "go-space-serv/internal/space/world"
+  "go-space-serv/internal/space/player"
+  "go-space-serv/internal/space/phys"
 )
 
 const cmdLen            int     = 1
@@ -47,11 +47,12 @@ type physicsServer struct {
   ctx                 context.Context
   lifeWG              sync.WaitGroup
   life          chan  struct{}
-  state               ServerState
+  state               snet.ServerState
   cancel              func()
 
-  players             Players
-  sim                 Simulation
+  players             udp.UDPPlayers
+  sim                 phys.Simulation
+  msgFactory          phys.MsgFactory
   ipsToPlayers        sync.Map
 
   launchTime          int64
@@ -88,7 +89,7 @@ func main() {
     pool: p,
     tick: 8333333,
     launchTime: time.Now().UnixNano(),
-    state: DEAD,
+    state: snet.DEAD,
     worldConnOpen: false,
   }
 
@@ -103,7 +104,7 @@ func main() {
   // Wait for context to finish
   <-ps.ctx.Done()
   log.Printf("Shuttind down...");
-  ps.state = SHUTDOWN
+  ps.state = snet.SHUTDOWN
   <-ps.life
 
   log.Printf("end")
@@ -111,7 +112,7 @@ func main() {
 
 func (ps *physicsServer) live() {
   var waitWorld sync.WaitGroup
-  ps.state = WAIT_WORLD
+  ps.state = snet.WAIT_WORLD
 
   waitWorld.Add(1)
   go ps.world(&waitWorld)
@@ -119,7 +120,7 @@ func (ps *physicsServer) live() {
 
   go ps.serve("udp://:9495")
 
-  ps.state = ALIVE
+  ps.state = snet.ALIVE
   ps.lifeWG.Wait()
 
   close(ps.life)
@@ -166,7 +167,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
 
   ps.worldConn = c
   ps.worldConnOpen = true
-  ps.state = SETUP
+  ps.state = snet.SETUP
 
   const(
     readingSize byte = iota
@@ -183,7 +184,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
   var mapBufRead int = 0
   reader := bufio.NewReader(c)
 
-  for ps.state <= ALIVE {
+  for ps.state <= snet.ALIVE {
     select {
     case <-ps.ctx.Done():
       log.Printf("Closing world connection...")
@@ -254,8 +255,8 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
             state = readingEvent
             log.Printf("Read worldMap bytes")
 
-            var msg NetworkMsg
-            msg.PutByte(byte(IReady))
+            var msg tcp.NetworkMsg
+            msg.PutByte(byte(snet.IReady))
             msg.PutUint32(udpPort)
             c.Write(snet.GetDataFromNetworkMsg(&msg))
 
@@ -271,25 +272,26 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
 
             eventContent, err2 := reader.Peek(eventSize)
             if err2 == nil {
-              if eventContent[0] == byte(IJoin) {
+              if eventContent[0] == byte(snet.IJoin) {
                 playerIdLenBytes := eventContent[1:3]
                 playerIdLen := snet.Read_uint16(playerIdLenBytes)
                 playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
                 ipLen := snet.Read_uint16(eventContent[3+playerIdLen:3+playerIdLen+2])
                 ipString := snet.Read_utf8(eventContent[3+playerIdLen+2:3+playerIdLen+2+ipLen])
-                player := ps.players.Add(playerId, NewPlayerStats())
-                if player != nil {
-                  player.SetSimChan(ps.sim.GetPlayerChan())
+                plr := ps.players.Add(playerId, player.NewPlayerStats())
+                if plr != nil {
+                  plr.SetSimChan(ps.sim.GetPlayerChan())
+                  plr.SetMsgFactory(&ps.msgFactory)
                 }
                 log.Printf("Storing %s <-> %s", ipString, playerId)
                 ps.ipsToPlayers.Store(ipString, playerId);
-              } else if eventContent[0] == byte(ILeave) {
+              } else if eventContent[0] == byte(snet.ILeave) {
                 playerIdLenBytes := eventContent[1:3]
                 playerIdLen := snet.Read_uint16(playerIdLenBytes)
                 playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
                 ps.players.Remove(playerId)
                 ps.sim.RemoveControlledBody(playerId)
-              } else if eventContent[0] == byte(IShutdown) {
+              } else if eventContent[0] == byte(snet.IShutdown) {
                 ps.cancel()
               }
             }
@@ -297,7 +299,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
           } else if err.Error() == "EOF" {
             ps.cancel() // TODO: retry connecting to world
             return
-          } else if ps.state == SHUTDOWN {
+          } else if ps.state == snet.SHUTDOWN {
             return
           } else {
             log.Printf("worldConn err: " + err.Error())
@@ -328,16 +330,16 @@ func (ps *physicsServer) OnShutdown(srv gnet.Server) {
     log.Printf("IShutdown -> world")
     // TODO: do this from world() when we actually
     // write something other than this so we can flush.
-    ps.worldConn.Write([]byte{1, 0, 0, 0, byte(IShutdown)})
+    ps.worldConn.Write([]byte{1, 0, 0, 0, byte(snet.IShutdown)})
     ps.worldConn.Close()
   }
 
-  ps.state = DEAD
+  ps.state = snet.DEAD
 }
 
 func (ps *physicsServer) Tick() (delay time.Duration, action gnet.Action) {
   delay = ps.tick
-  if ps.state == SHUTDOWN {
+  if ps.state == snet.SHUTDOWN {
     action = gnet.Shutdown
   }
   return
@@ -351,15 +353,15 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
   if valid {
     bytes := data
     _ = ps.pool.Submit(func() {
-      var player *UdpPlayer
+      var plr *udp.UDPPlayer
       playerId, ok := ps.ipsToPlayers.Load(ipString)
       if ok {
-        player = ps.players.GetPlayer(playerId.(string))
+        plr = ps.players.GetPlayer(playerId.(string))
       }
 
       valid = valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId()
-      if valid && player != nil {
-        player.PacketReceive(bytes, connection)
+      if valid && plr != nil {
+        plr.PacketReceive(bytes, connection)
       }
     })
   } else {

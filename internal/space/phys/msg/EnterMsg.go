@@ -1,8 +1,8 @@
-package phys
+package msg
 
 import (
   "encoding/binary"
-  . "go-space-serv/internal/app/phys/types"
+  "go-space-serv/internal/space/snet/udp"
 )
 
 type EnterMsg struct {
@@ -12,11 +12,11 @@ type EnterMsg struct {
   Y uint32
 }
 
-func (msg *EnterMsg) GetCmd() UDPCmd { return ENTER }
+func (msg *EnterMsg) GetCmd() udp.UDPCmd { return udp.ENTER }
 
 func (msg *EnterMsg) Serialize(bytes []byte) {
   offset := 0
-  bytes[offset] = byte(ENTER)
+  bytes[offset] = byte(udp.ENTER)
   offset++
   stringBytes := []byte(msg.PlayerId)
   playerIdLen := len(stringBytes)

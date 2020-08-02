@@ -1,4 +1,4 @@
-package snet
+package tcp
 
 import(
   "log"

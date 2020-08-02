@@ -1,4 +1,4 @@
-package phys
+package udp
 
 import (
   "log"
@@ -9,18 +9,15 @@ import (
 
   "github.com/panjf2000/gnet"
 
-  "go-space-serv/internal/app/snet"
-  "go-space-serv/internal/app/util"
-
-  . "go-space-serv/internal/app/phys/interface"
-  . "go-space-serv/internal/app/phys/types"
-  . "go-space-serv/internal/app/player/types"
+  "go-space-serv/internal/space/player"
+  "go-space-serv/internal/space/snet"
+  "go-space-serv/internal/space/util"
 )
 
-type UdpPlayerState byte
+type UDPPlayerState byte
 
 const (
-  DISCONNECTED UdpPlayerState = iota
+  DISCONNECTED UDPPlayerState = iota
   CHALLENGED
   CONNECTED
   PLAYING
@@ -36,7 +33,7 @@ type PacketData struct {
   Size      int32
 }
 
-type UdpPlayer struct {
+type UDPPlayer struct {
   spamChan          chan struct{}
   name              string
   active            bool
@@ -59,14 +56,15 @@ type UdpPlayer struct {
   packetBufferEmpty bool
 
   connection        gnet.Conn
+  msgFactory        UDPMsgFactory
   toSim             chan UDPMsg
   toClient          chan UDPMsg
-  state             UdpPlayerState
-  stats             *PlayerStats
+  state             UDPPlayerState
+  stats             *player.PlayerStats
 }
 
-func NewUdpPlayer(n string) *UdpPlayer {
-  var p UdpPlayer
+func NewUdpPlayer(n string) *UDPPlayer {
+  var p UDPPlayer
   p.name = n
   p.active = false
   p.state = DISCONNECTED
@@ -94,17 +92,17 @@ func seqGreaterThan(s1 uint16, s2 uint16) bool {
   return ((s1 > s2) && (s1-s2 <= 32768)) || ((s1 < s2) && (s2-s1 > 32768))
 }
 
-func (p *UdpPlayer) getPacketData(seq uint16) PacketData {
+func (p *UDPPlayer) getPacketData(seq uint16) PacketData {
   return p.packetData[seq % BUFFER_SIZE]
 }
 
-func (p *UdpPlayer) insertPacketData(pd PacketData, seq uint16) {
+func (p *UDPPlayer) insertPacketData(pd PacketData, seq uint16) {
   idx := seq % BUFFER_SIZE
   p.seqBuffer[idx] = uint32(seq)
   p.packetData[idx] = pd
 }
 
-func (p *UdpPlayer) onPacketAcked(seq uint16) {
+func (p *UDPPlayer) onPacketAcked(seq uint16) {
   idx := seq % BUFFER_SIZE
   if p.seqBuffer[idx] == uint32(seq) {
     p.packetData[idx].Acked = true
@@ -114,7 +112,7 @@ func (p *UdpPlayer) onPacketAcked(seq uint16) {
   // TODO: calculate exponential moving average RTT
 }
 
-func (p *UdpPlayer) getMsg() UDPMsg {
+func (p *UDPPlayer) getMsg() UDPMsg {
   var tmp UDPMsg
   select {
   case tmp = <-p.toClient:
@@ -126,7 +124,7 @@ func (p *UdpPlayer) getMsg() UDPMsg {
 }
 
 // Sends a packet every rate milliseconds count times
-func (p *UdpPlayer) sendRepeating(msg []byte, rate, count int) {
+func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
   if p.spamChan != nil {
     close(p.spamChan)
   }
@@ -157,7 +155,7 @@ func (p *UdpPlayer) sendRepeating(msg []byte, rate, count int) {
   }()
 }
 
-func (p *UdpPlayer) unpack(packet []byte) {
+func (p *UDPPlayer) unpack(packet []byte) {
   head := 8
   tail := 0
   salt := snet.Read_int64(packet[tail:head])
@@ -194,13 +192,13 @@ func (p *UdpPlayer) unpack(packet []byte) {
       p.rxSeq = seq
 
       for head < msgLen {
-        head = CreateAndPublishMsg(packet, head, p.toSim, p.name)
+        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.toSim, p.name)
       }
     }
   }
 }
 
-func (p *UdpPlayer) PackAndSend() {
+func (p *UDPPlayer) PackAndSend() {
   numMsgs := len(p.toClient)
   shouldStop := numMsgs == 0
   shouldStop = shouldStop && p.txSeq == p.txAck
@@ -279,7 +277,7 @@ func (p *UdpPlayer) PackAndSend() {
   p.connection.SendTo(p.packetBuffer[:p.packetBufferTail])
 }
 
-func (p *UdpPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
+func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
   // Respond to HELLO with CHALLENGE
   if p.state == DISCONNECTED {
     // enforce padding to avoid participating in DDoS minification
@@ -339,75 +337,79 @@ func (p *UdpPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
   return;
 }
 
-func (p *UdpPlayer) AddMsg(msg UDPMsg) {
+func (p *UDPPlayer) AddMsg(m UDPMsg) {
   select {
-  case p.toClient <- msg:
+  case p.toClient <- m:
   default:
     log.Printf("%s msg queue full. Discarding...", p.name)
   }
 }
 
-func (p *UdpPlayer) SetSimChan(ch chan UDPMsg) {
+func (p *UDPPlayer) SetSimChan(ch chan UDPMsg) {
   p.toSim = ch
 }
 
-func (p *UdpPlayer) GetName() string {
+func (p *UDPPlayer) SetMsgFactory(factory UDPMsgFactory) {
+  p.msgFactory = factory
+}
+
+func (p *UDPPlayer) GetName() string {
   return p.name
 }
 
-func (p *UdpPlayer) Activate() {
+func (p *UDPPlayer) Activate() {
   p.active = true
 }
 
-func (p *UdpPlayer) Deactivate() {
+func (p *UDPPlayer) Deactivate() {
   p.active = false
 }
 
-func (p *UdpPlayer) IsActive() bool {
+func (p *UDPPlayer) IsActive() bool {
   return p.active
 }
 
-func (p *UdpPlayer) SetState(s UdpPlayerState) {
+func (p *UDPPlayer) SetState(s UDPPlayerState) {
   p.state = s
 }
 
-func (p *UdpPlayer) SetStats(s *PlayerStats) {
+func (p *UDPPlayer) SetStats(s *player.PlayerStats) {
   p.stats = s
 }
 
-func (p *UdpPlayer) GetStats() *PlayerStats {
+func (p *UDPPlayer) GetStats() *player.PlayerStats {
   return p.stats
 }
 
-func (p *UdpPlayer) GetState() UdpPlayerState {
+func (p *UDPPlayer) GetState() UDPPlayerState {
   return p.state
 }
 
-func (p *UdpPlayer) SetConnection(c gnet.Conn) {
+func (p *UDPPlayer) SetConnection(c gnet.Conn) {
   p.connection = c
 }
 
-func (p *UdpPlayer) SetClientSalt(salt int64) {
+func (p *UDPPlayer) SetClientSalt(salt int64) {
   p.clientSalt = salt
 }
-func (p *UdpPlayer) GetClientSalt() int64 {
+func (p *UDPPlayer) GetClientSalt() int64 {
   return p.clientSalt
 }
-func (p *UdpPlayer) SetServerSalt(salt int64) {
+func (p *UDPPlayer) SetServerSalt(salt int64) {
   p.serverSalt = salt
 }
-func (p *UdpPlayer) GetServerSalt() int64 {
+func (p *UDPPlayer) GetServerSalt() int64 {
   return p.serverSalt
 }
 
-func (p *UdpPlayer) GetConnection() gnet.Conn {
+func (p *UDPPlayer) GetConnection() gnet.Conn {
   return p.connection
 }
 
-func (p *UdpPlayer) Sync(time int64) {
+func (p *UDPPlayer) Sync(time int64) {
   p.lastSync = time
 }
 
-func (p *UdpPlayer) GetLastSync() int64 {
+func (p *UDPPlayer) GetLastSync() int64 {
   return p.lastSync
 }

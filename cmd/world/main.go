@@ -17,9 +17,9 @@ import (
   // integer math
   //"github.com/bxcodec/saint"
 
-  "go-space-serv/internal/app/world"
-  "go-space-serv/internal/app/snet"
-  . "go-space-serv/internal/app/snet/types"
+  "go-space-serv/internal/space/world"
+  "go-space-serv/internal/space/snet"
+  "go-space-serv/internal/space/snet/tcp"
 )
 
 type worldServer struct {
@@ -28,7 +28,7 @@ type worldServer struct {
   pool              *goroutine.Pool
   tick              time.Duration
   players           sync.Map
-  state             ServerState
+  state             snet.ServerState
   physics           gnet.Conn
   physicsIP         net.IP
   physicsPort       int
@@ -56,18 +56,18 @@ var spawnX int = 500;
 var spawnY int = 500;
 var viewSize = 50; // todo: make this a player stat
 
-func (ws *worldServer) getPlayer(ip string) *world.TCPPlayer{
+func (ws *worldServer) getPlayer(ip string) *tcp.TCPPlayer{
   plr, ok := ws.players.Load(ip)
   if ok && plr != nil {
-    return plr.(*world.TCPPlayer)
+    return plr.(*tcp.TCPPlayer)
   }
 
   return nil
 }
 
-func (ws *worldServer) propagateMsg(playerId string, msg *NetworkMsg) {
+func (ws *worldServer) propagateMsg(playerId string, msg *tcp.NetworkMsg) {
   ws.players.Range(func(key, value interface{}) bool {
-    plr := value.(*world.TCPPlayer)
+    plr := value.(*tcp.TCPPlayer)
 
     if plr.GetPlayerId() != playerId {
       plr.AddMsg(msg);
@@ -78,13 +78,13 @@ func (ws *worldServer) propagateMsg(playerId string, msg *NetworkMsg) {
 }
 
 func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
-  var plr world.TCPPlayer
+  var plr tcp.TCPPlayer
   plr.Init(c)
   playerId := plr.GetPlayerId()
 
   // Let other clients know
-  joinMsg := new(NetworkMsg)
-  joinMsg.PutByte(byte(SPlayerJoin))
+  joinMsg := new(tcp.NetworkMsg)
+  joinMsg.PutByte(byte(snet.SPlayerJoin))
   joinMsg.PutString(playerId)
   stats := plr.GetPlayerStats()
   joinMsg.PutFloat32(stats.Thrust)
@@ -94,11 +94,11 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
 
   // Let this client know about connected players
   ws.players.Range(func(key, value interface{}) bool {
-    p := value.(*world.TCPPlayer)
+    p := value.(*tcp.TCPPlayer)
 
     if p.GetPlayerId() != playerId {
-      connectedMsg := new(NetworkMsg)
-      connectedMsg.PutByte(byte(SPlayerJoin))
+      connectedMsg := new(tcp.NetworkMsg)
+      connectedMsg.PutByte(byte(snet.SPlayerJoin))
       connectedMsg.PutString(playerId)
       stats = plr.GetPlayerStats()
       connectedMsg.PutFloat32(stats.Thrust)
@@ -111,8 +111,8 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   })
 
   // Let this client know their player stats
-  statsMsg := new(NetworkMsg)
-  statsMsg.PutByte(byte(SPlayerStats))
+  statsMsg := new(tcp.NetworkMsg)
+  statsMsg.PutByte(byte(snet.SPlayerStats))
   statsMsg.PutString(plr.GetPlayerId())
   statsMsg.PutFloat32(stats.Thrust)
   statsMsg.PutFloat32(stats.MaxSpeed)
@@ -128,14 +128,14 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   plr.InitExploredPoly(float64(spawnX - viewSize), float64(spawnX + viewSize), float64(spawnY - viewSize), float64(spawnY + viewSize))
 
   blocksLen := len(blocks)
-  blocksMsgs := []*NetworkMsg{}
-  currentMsg := new(NetworkMsg)
-  currentMsg.PutByte(byte(SBlocks));
+  blocksMsgs := []*tcp.NetworkMsg{}
+  currentMsg := new(tcp.NetworkMsg)
+  currentMsg.PutByte(byte(snet.SBlocks));
   for i, j := 0, 0; i < blocksLen; i++ {
     if j >= maxBlocksPerMsg {
       blocksMsgs = append(blocksMsgs, currentMsg)
-      currentMsg = new(NetworkMsg)
-      currentMsg.PutByte(byte(SBlocks))
+      currentMsg = new(tcp.NetworkMsg)
+      currentMsg.PutByte(byte(snet.SBlocks))
       j = 0
     }
     currentMsg.PutBytes(blocks[i].Serialize())
@@ -147,16 +147,16 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   ws.players.Store(c.RemoteAddr().String(), &plr)
 
   // notify physics server
-  var physMsg NetworkMsg
-  physMsg.PutByte(byte(IJoin))
+  var physMsg tcp.NetworkMsg
+  physMsg.PutByte(byte(snet.IJoin))
   physMsg.PutString(plr.GetPlayerId())
   physMsg.PutString(c.RemoteAddr().(*net.TCPAddr).IP.String());
   log.Printf("Sending connection event to physics");
   ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
 
   // send physics connection details to this client
-  var physConnectionMsg NetworkMsg
-  physConnectionMsg.PutByte(byte(SConnectionInfo))
+  var physConnectionMsg tcp.NetworkMsg
+  physConnectionMsg.PutByte(byte(snet.SConnectionInfo))
   physConnectionMsg.PutBytes(ws.physicsIP)
   physConnectionMsg.PutUint32(ws.physicsPort)
   physConnectionMsg.PutString(plr.GetPlayerId())
@@ -170,18 +170,18 @@ func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
   if plr != nil {
     disconnectedPlayerId := plr.GetPlayerId()
 
-    var physMsg NetworkMsg
-    physMsg.PutByte(byte(ILeave))
+    var physMsg tcp.NetworkMsg
+    physMsg.PutByte(byte(snet.ILeave))
     physMsg.PutString(plr.GetPlayerId())
     log.Printf("Sending disconnection event to physics");
     ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
 
     // Let other clients know about this event
     ws.players.Range(func(key, value interface{}) bool {
-      plr := value.(*world.TCPPlayer)
+      plr := value.(*tcp.TCPPlayer)
       if plr.GetPlayerId() != disconnectedPlayerId {
-        disconnectedMsg := new(NetworkMsg)
-        disconnectedMsg.PutByte(byte(SPlayerLeave))
+        disconnectedMsg := new(tcp.NetworkMsg)
+        disconnectedMsg.PutByte(byte(snet.SPlayerLeave))
         disconnectedMsg.PutString(disconnectedPlayerId)
         plr.AddMsg(disconnectedMsg)
       }
@@ -195,7 +195,7 @@ func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
   ws.physics = c
   ws.physicsOpen = true
   ws.physicsIP = snet.GetOutboundIP()
-  ws.state = SETUP
+  ws.state = snet.SETUP
   log.Printf("Physics server connected.")
 
   // send physics server the map details
@@ -210,20 +210,20 @@ func (ws *worldServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
   log.Printf("[%s] o", c.RemoteAddr().String())
 
   switch ws.state {
-    case WAIT_PHYS:
+    case snet.WAIT_PHYS:
       // check if this is the physics server
       if isPhysicsConnection(c) {
         out = ws.initPhysicsConnection(c)
       } else {
         action = gnet.Close
       }
-    case SETUP:
+    case snet.SETUP:
       // deny connections
       action = gnet.Close
-    case ALIVE:
+    case snet.ALIVE:
       // accept connections
       ws.initPlayerConnection(c)
-    case SHUTDOWN:
+    case snet.SHUTDOWN:
       // deny connections
       action = gnet.Close
     default:
@@ -256,14 +256,14 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
   //data := append([]byte{}, c.Read()...)
   if isPhysicsConnection(c) {
     _ = ws.pool.Submit(func() {
-      if ws.state == SETUP && len(data) >= 4 {
+      if ws.state == snet.SETUP && len(data) >= 4 {
         if (len(data) >= 4) {
           msg := snet.GetNetworkMsgFromData(data)
           if msg != nil {
             c.ResetBuffer()
-            if msg.Data[0] == byte(IReady) {
+            if msg.Data[0] == byte(snet.IReady) {
               ws.physicsPort = snet.Read_int32(msg.Data[1:])
-              ws.state = ALIVE
+              ws.state = snet.ALIVE
               log.Printf("Accepting player connections...")
             }
           }
@@ -301,10 +301,10 @@ func (ws *worldServer) OnShutdown(s gnet.Server) {
 func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
   delay = ws.tick
 
-  if ws.state == ALIVE {
+  if ws.state == snet.ALIVE {
     ws.players.Range(func(key, value interface{}) bool {
       addr := key.(string)
-      plr := value.(*world.TCPPlayer)
+      plr := value.(*tcp.TCPPlayer)
       c := plr.GetConnection()
 
       numMsgs := plr.NumMsgs()
@@ -321,7 +321,7 @@ func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
   return
 }
 
-func interpret(msg NetworkMsg, c gnet.Conn) (*NetworkMsg){
+func interpret(msg tcp.NetworkMsg, c gnet.Conn) (*tcp.NetworkMsg){
   log.Printf("[%s] -> %d", c.RemoteAddr().String(), msg.Size)
   return world.HandleCmd(msg.Data)
 }
@@ -348,7 +348,7 @@ func main() {
   ws := &worldServer{
     pool: p,
     tick: 100000000,
-    state: WAIT_PHYS,
+    state: snet.WAIT_PHYS,
     worldMap: &wm,
   }
 
@@ -360,7 +360,7 @@ func main() {
   <-ws.ctx.Done()
   log.Printf("Shutting down...")
   ws.lifeWG.Add(1)
-  ws.state = SHUTDOWN
+  ws.state = snet.SHUTDOWN
   <-ws.life
 
   log.Printf("end")
@@ -378,7 +378,7 @@ func (ws *worldServer) live() {
   }()
 
   ws.lifeWG.Wait()
-  ws.state = DEAD
+  ws.state = snet.DEAD
   ws.cancel()
   close(ws.life)
 }

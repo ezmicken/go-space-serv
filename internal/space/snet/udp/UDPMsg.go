@@ -1,8 +1,4 @@
-package phys
-
-import(
-  . "go-space-serv/internal/app/phys/types"
-)
+package udp
 
 type UDPMsg interface {
   GetCmd() UDPCmd

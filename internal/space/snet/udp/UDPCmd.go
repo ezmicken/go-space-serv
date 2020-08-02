@@ -1,4 +1,4 @@
-package phys
+package udp
 
 type UDPCmd byte
 

@@ -8,7 +8,7 @@ import(
   "strings"
   "net"
 
-  . "go-space-serv/internal/app/snet/types"
+  "go-space-serv/internal/space/snet/tcp"
 )
 
 const PrefixLength int = 4
@@ -73,20 +73,20 @@ func Read_utf8(data []byte) string {
 }
 
 // Gets the whole message from the stream
-func GetNetworkMsgFromData(data [] byte) (*NetworkMsg) {
+func GetNetworkMsgFromData(data [] byte) (*tcp.NetworkMsg) {
   dataLen := len(data)
   if dataLen >= PrefixLength {
     msgLen := Read_int32(data[:4])
     if dataLen - PrefixLength == msgLen {
       msgData := data[4:]
-      return &NetworkMsg{Size: msgLen, Data: msgData}
+      return &tcp.NetworkMsg{Size: msgLen, Data: msgData}
     }
   }
 
   return nil
 }
 
-func GetDataFromNetworkMsg(msg *NetworkMsg) (out []byte) {
+func GetDataFromNetworkMsg(msg *tcp.NetworkMsg) (out []byte) {
   // size
   sizeBuf := new(bytes.Buffer)
   err := binary.Write(sizeBuf, binary.LittleEndian, int32(msg.Size))

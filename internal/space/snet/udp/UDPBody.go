@@ -1,11 +1,11 @@
-package phys
+package udp
 
 import (
   "encoding/binary"
   "bytes"
   //"log"
 
-  "go-space-serv/internal/app/snet"
+  "go-space-serv/internal/space/snet"
 
   //"github.com/go-gl/mathgl/mgl32"
 )
@@ -13,10 +13,10 @@ import (
 // data
 /////////////////////
 
-type UdpBody struct {
+type UDPBody struct {
   // these are used only by server
-  controllingPlayer *UdpPlayer
-  owningPlayer      *UdpPlayer
+  controllingPlayer *UDPPlayer
+  owningPlayer      *UDPPlayer
   dead              bool
 
   id   uint16
@@ -29,7 +29,7 @@ type UdpBody struct {
   yAcc float32
 }
 
-func (b *UdpBody) Serialize() []byte {
+func (b *UDPBody) Serialize() []byte {
   var buf bytes.Buffer
 
   binary.Write(&buf, binary.LittleEndian, b.id)
@@ -44,8 +44,8 @@ func (b *UdpBody) Serialize() []byte {
 // instantiation
 ///////////////////////
 
-func NewControlledUdpBody(player *UdpPlayer) (*UdpBody) {
-  bod := NewUdpBody();
+func NewControlledBody(player *UDPPlayer) (*UDPBody) {
+  bod := NewUDPBody();
   bod.controllingPlayer = player
   bod.owningPlayer = player
   bod.dead = false;
@@ -59,8 +59,8 @@ func NewControlledUdpBody(player *UdpPlayer) (*UdpBody) {
   return bod
 }
 
-func NewUdpBody() (*UdpBody) {
-  var b UdpBody
+func NewUDPBody() (*UDPBody) {
+  var b UDPBody
   b.id = snet.GetNextId()
   b.xVel = 0
   b.yVel = 0
@@ -77,67 +77,67 @@ func NewUdpBody() (*UdpBody) {
 // access / modify
 //////////////////////////////
 
-func (b *UdpBody) SetControllingPlayer(player *UdpPlayer) {
+func (b *UDPBody) SetControllingPlayer(player *UDPPlayer) {
   b.controllingPlayer = player
 }
 
-func (b *UdpBody) GetControllingPlayer() *UdpPlayer {
+func (b *UDPBody) GetControllingPlayer() *UDPPlayer {
   return b.controllingPlayer
 }
 
-func (b *UdpBody) SetOwningPlayer(player *UdpPlayer) {
+func (b *UDPBody) SetOwningPlayer(player *UDPPlayer) {
   b.owningPlayer = player
 }
 
-func (b *UdpBody) GetOwningPlayer() *UdpPlayer {
+func (b *UDPBody) GetOwningPlayer() *UDPPlayer {
   return b.owningPlayer
 }
 
-func (b *UdpBody) Kill() {
+func (b *UDPBody) Kill() {
   b.dead = true;
 }
 
-func (b *UdpBody) IsDead() bool {
+func (b *UDPBody) IsDead() bool {
   return b.dead
 }
 
-func (b *UdpBody) GetId() uint16 {
+func (b *UDPBody) GetId() uint16 {
   return b.id
 }
 
-func (b *UdpBody) SetRot(r float32) {
+func (b *UDPBody) SetRot(r float32) {
   b.rot = r
 }
 
-func (b *UdpBody) GetRot() float32 {
+func (b *UDPBody) GetRot() float32 {
   return b.rot
 }
 
-func (b *UdpBody) SetPos(x, y float32) {
+func (b *UDPBody) SetPos(x, y float32) {
   b.xPos = x
   b.yPos = y
 }
-func (b *UdpBody) GetPos() (x, y float32) {
+func (b *UDPBody) GetPos() (x, y float32) {
   x = b.xPos
   y = b.yPos
   return
 }
 
-func (b *UdpBody) SetVel(x, y float32) {
+func (b *UDPBody) SetVel(x, y float32) {
   b.xVel = x
   b.yVel = y
 }
-func (b *UdpBody) GetVel() (x, y float32) {
+func (b *UDPBody) GetVel() (x, y float32) {
   x = b.xVel
   y = b.yVel
   return
 }
 
-func (b *UdpBody) SetAcc(x, y float32) {
+func (b *UDPBody) SetAcc(x, y float32) {
   b.xAcc = x
   b.yAcc = y
 }
-func (b *UdpBody) GetXAcc() (x, y float32) {
+func (b *UDPBody) GetXAcc() (x, y float32) {
   x = b.xAcc
   y = b.yAcc
   return

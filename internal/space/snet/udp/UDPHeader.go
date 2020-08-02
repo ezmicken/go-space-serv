@@ -1,4 +1,4 @@
-package phys
+package udp
 
 import(
   "encoding/binary"

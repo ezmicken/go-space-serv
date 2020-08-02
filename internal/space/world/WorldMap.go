@@ -3,9 +3,8 @@ package world
 import (
   "github.com/ojrac/opensimplex-go"
 
-  ."go-space-serv/internal/app/world/types"
-  ."go-space-serv/internal/app/snet/types"
-  "go-space-serv/internal/app/snet"
+  "go-space-serv/internal/space/snet"
+  "go-space-serv/internal/space/snet/tcp"
 )
 
 type WorldMap struct {
@@ -69,18 +68,18 @@ func (wm *WorldMap) GetCellCenter(x, y int) (xPos, yPos float32) {
   return
 }
 
-func (wm *WorldMap) SerializeInfo() (out *NetworkMsg) {
-  var msg NetworkMsg
+func (wm *WorldMap) SerializeInfo() (out *tcp.NetworkMsg) {
+  var msg tcp.NetworkMsg
 
-  msg.PutByte(byte(SWorldInfo))
+  msg.PutByte(byte(snet.SWorldInfo))
   msg.PutUint32(wm.W)
   msg.PutUint32(wm.H)
 
   return &msg
 }
 
-func (wm *WorldMap) Serialize() (out *NetworkMsg) {
-  var msg NetworkMsg
+func (wm *WorldMap) Serialize() (out *tcp.NetworkMsg) {
+  var msg tcp.NetworkMsg
 
   msg.PutUint32(wm.W)
   msg.PutUint32(wm.H)

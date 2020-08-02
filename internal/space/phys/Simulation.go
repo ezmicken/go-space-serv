@@ -5,33 +5,30 @@ import (
   "sync"
   "time"
 
-  "go-space-serv/internal/app/util"
-  "go-space-serv/internal/app/world"
-
-  . "go-space-serv/internal/app/phys/msg/incoming"
-  . "go-space-serv/internal/app/phys/msg/outgoing"
-  . "go-space-serv/internal/app/phys/interface"
-  . "go-space-serv/internal/app/phys/types"
+  "go-space-serv/internal/space/util"
+  "go-space-serv/internal/space/world"
+  "go-space-serv/internal/space/phys/msg"
+  "go-space-serv/internal/space/snet/udp"
 )
 
 type Simulation struct {
-  controlledBodies sync.Map
-  allBodies        []*UdpBody
-  worldMap         *world.WorldMap
-  players          *Players
+  controlledBodies    sync.Map
+  allBodies           []*udp.UDPBody
+  worldMap            *world.WorldMap
+  players             *udp.UDPPlayers
 
   // Timing
-  seq                 uint16 // incremented each simulation frame, sync when rolls over
-  lastSync            int64  // unix nanos the last time sync was performed
-  lastFrame           int64  // unix nanos since the last simulation frame
-  framesSinceLastSync int64  // simulation frames since last sync
+  seq                 uint16      // incremented each simulation frame, sync when rolls over
+  lastSync            int64       // unix nanos the last time sync was performed
+  lastFrame           int64       // unix nanos since the last simulation frame
+  framesSinceLastSync int64       // simulation frames since last sync
 
-  fromPlayers chan    UDPMsg // incoming msgs from clients (UdpPlayer)
+  fromPlayers chan    udp.UDPMsg  // incoming msgs from clients (UdpPlayer)
 }
 
-func (s *Simulation) Start(worldMap *world.WorldMap, players *Players) {
+func (s *Simulation) Start(worldMap *world.WorldMap, players *udp.UDPPlayers) {
   s.players = players
-  s.fromPlayers = make(chan UDPMsg, 100)
+  s.fromPlayers = make(chan udp.UDPMsg, 100)
   s.worldMap = worldMap
   s.seq = 0
   s.lastSync = 0
@@ -54,23 +51,23 @@ func (s *Simulation) processFrame(frameStart int64) {
     }
 
     switch t := tmp.(type) {
-      case *CmdMsg:
-        msg := t
-        playerId := msg.GetPlayerId()
-        cmd := msg.GetCmd()
+      case *msg.CmdMsg:
+        m := t
+        playerId := m.GetPlayerId()
+        cmd := m.GetCmd()
         switch cmd {
-          case SYNC:
+          case udp.SYNC:
             syncTime := s.lastFrame / (int64(time.Millisecond) / int64(time.Nanosecond))
 
-            var response SyncMsg
+            var response msg.SyncMsg
             response.Seq = s.seq
             response.Time = uint64(syncTime)
 
             s.players.AddMsg(&response, playerId)
-          case ENTER:
+          case udp.ENTER:
             // TODO: verify rtt/ploss limit
             player := s.players.GetPlayer(playerId)
-            if player != nil && player.GetState() != SPECTATING {
+            if player != nil && player.GetState() != udp.SPECTATING {
               log.Printf("player %s spawn when not spectating.", playerId)
               break
             }
@@ -78,26 +75,26 @@ func (s *Simulation) processFrame(frameStart int64) {
             spawnX := s.worldMap.SpawnX
             spawnY := s.worldMap.SpawnY
             x, y := s.worldMap.GetCellCenter(spawnX, spawnY)
-            pBod := NewControlledUdpBody(player)
+            pBod := udp.NewControlledBody(player)
             pBod.SetPos(x, y)
             s.addControlledBody(playerId, pBod)
 
             log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
 
-            var response EnterMsg
+            var response msg.EnterMsg
             response.PlayerId = player.GetName()
             response.BodyId = pBod.GetId();
             response.X = uint32(spawnX)
             response.Y = uint32(spawnY)
             s.players.AddMsgAll(&response)
         }
-      case *MoveShootMsg:
-        msg := t
-        playerId := msg.GetPlayerId()
+      case *msg.MoveShootMsg:
+        m := t
+        playerId := m.GetPlayerId()
         bod, ok := s.controlledBodies.Load(playerId)
         if ok && bod != nil {
-          msg.BodyId = bod.(*UdpBody).GetId();
-          s.players.AddMsgExcluding(msg, playerId)
+          m.BodyId = bod.(*udp.UDPBody).GetId();
+          s.players.AddMsgExcluding(m, playerId)
         }
         break
       default:
@@ -172,7 +169,7 @@ func (s *Simulation) pullFromPlayers() interface{} {
 // Modify
 ///////////
 
-func (s *Simulation) addControlledBody(id string, bod *UdpBody) {
+func (s *Simulation) addControlledBody(id string, bod *udp.UDPBody) {
   s.allBodies = append(s.allBodies, bod)
   s.controlledBodies.Store(id, bod)
 }
@@ -180,7 +177,7 @@ func (s *Simulation) addControlledBody(id string, bod *UdpBody) {
 func (s *Simulation) RemoveControlledBody(id string) {
   bod, ok := s.controlledBodies.Load(id)
   if ok && bod != nil {
-    bod.(*UdpBody).Kill()
+    bod.(*udp.UDPBody).Kill()
     s.controlledBodies.Delete(id)
   }
 }
@@ -196,6 +193,6 @@ func (s *Simulation) GetSeq() uint16 {
   return s.seq
 }
 
-func (s *Simulation) GetPlayerChan() chan UDPMsg {
+func (s *Simulation) GetPlayerChan() chan udp.UDPMsg {
   return s.fromPlayers
 }

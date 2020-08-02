@@ -1,19 +1,18 @@
-package phys
+package udp
 
 import (
 	"sync"
 	"log"
 
-  . "go-space-serv/internal/app/phys/interface"
-	. "go-space-serv/internal/app/player/types"
+	"go-space-serv/internal/space/player"
 )
 
-type Players struct {
+type UDPPlayers struct {
 	Count int
 	playerMap sync.Map
 }
 
-func (p *Players) Add(id string, stats *PlayerStats) *UdpPlayer {
+func (p *UDPPlayers) Add(id string, stats *player.PlayerStats) *UDPPlayer {
 	player := NewUdpPlayer(id)
 	player.SetStats(stats)
 
@@ -25,21 +24,21 @@ func (p *Players) Add(id string, stats *PlayerStats) *UdpPlayer {
   return player
 }
 
-func (p *Players) Remove(id string) {
+func (p *UDPPlayers) Remove(id string) {
   p.playerMap.Delete(id)
   log.Printf("%s left the simulation", id)
 }
 
-func (p *Players) GetPlayer(id string) *UdpPlayer {
+func (p *UDPPlayers) GetPlayer(id string) *UDPPlayer {
 	player, ok := p.playerMap.Load(id)
 	if ok {
-		return player.(*UdpPlayer)
+		return player.(*UDPPlayer)
 	}
 
 	return nil
 }
 
-func (p *Players) AddMsg(msg UDPMsg, playerId string) {
+func (p *UDPPlayers) AddMsg(msg UDPMsg, playerId string) {
   player := p.GetPlayer(playerId)
   if player != nil && player.GetState() >= CONNECTED {
     player.AddMsg(msg)
@@ -48,9 +47,9 @@ func (p *Players) AddMsg(msg UDPMsg, playerId string) {
   }
 }
 
-func (p *Players) AddMsgAll(msg UDPMsg) {
+func (p *UDPPlayers) AddMsgAll(msg UDPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
-    player := value.(*UdpPlayer)
+    player := value.(*UDPPlayer)
     if player.GetState() >= CONNECTED {
       player.AddMsg(msg);
     }
@@ -58,9 +57,9 @@ func (p *Players) AddMsgAll(msg UDPMsg) {
   })
 }
 
-func (p *Players) AddMsgExcluding(msg UDPMsg, playerId string) {
+func (p *UDPPlayers) AddMsgExcluding(msg UDPMsg, playerId string) {
   p.playerMap.Range(func(key, value interface{}) bool {
-    player := value.(*UdpPlayer)
+    player := value.(*UDPPlayer)
     if player.GetState() >= CONNECTED && player.GetName() != playerId {
       player.AddMsg(msg);
     }
@@ -68,9 +67,9 @@ func (p *Players) AddMsgExcluding(msg UDPMsg, playerId string) {
   })
 }
 
-func (p *Players) PackAndSend() {
+func (p *UDPPlayers) PackAndSend() {
   p.playerMap.Range(func(key, value interface{}) bool {
-    player := value.(*UdpPlayer)
+    player := value.(*UDPPlayer)
     if player.GetState() >= CONNECTED {
       player.PackAndSend()
     }

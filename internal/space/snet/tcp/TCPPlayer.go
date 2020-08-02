@@ -1,22 +1,21 @@
-package world
+package tcp
 
 import (
+  "log"
   "github.com/teris-io/shortid"
   "github.com/akavel/polyclip-go"
   "github.com/panjf2000/gnet"
   "container/list"
 
-  . "go-space-serv/internal/app/snet/types"
-  . "go-space-serv/internal/app/player/types"
-  "log"
+  "go-space-serv/internal/space/player"
 )
 
 type TCPPlayer struct {
-  explored polyclip.Polygon
-  msgQueue *list.List
-  playerId string
-  stats *PlayerStats
-  c gnet.Conn
+  explored  polyclip.Polygon
+  msgQueue  *list.List
+  playerId  string
+  stats     *player.PlayerStats
+  c         gnet.Conn
 }
 
 var sid *shortid.Shortid
@@ -40,7 +39,7 @@ func (p *TCPPlayer) Init(conn gnet.Conn) {
   p.playerId = id
   log.Printf("generated playerId: %s", id)
 
-  p.stats = NewPlayerStats(); // TODO: get this from db
+  p.stats = player.NewPlayerStats(); // TODO: get this from db
   p.c = conn
 }
 
@@ -70,7 +69,7 @@ func (p *TCPPlayer) GetPlayerId() string {
   return p.playerId
 }
 
-func (p *TCPPlayer) GetPlayerStats() *PlayerStats {
+func (p *TCPPlayer) GetPlayerStats() *player.PlayerStats {
   return p.stats;
 }
 
