@@ -224,31 +224,33 @@ func (ws *worldServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
   bytes := append([]byte{}, data...)
   c.ResetBuffer()
-  _ = ws.pool.Submit(func() {
-    if ws.state == snet.SETUP && len(bytes) >= 5 && bytes[0] == byte(snet.IReady) {
-      ws.physicsPort = int(snet.Read_uint32(bytes[1:]))
-      log.Printf("Accepting player connections...")
-    } else {
-      // _ = ws.pool.Submit(func() {
-      //   if len(data) >= 4 {
-      //     msg := snet.GetNetworkMsgFromData(data)
-      //     if msg != nil {
-      //       responseMsg := interpret(*msg, c)
-      //       c.ResetBuffer();
+  if isPhysicsConnection(c) {
+    _ = ws.pool.Submit(func() {
+      if ws.state == snet.SETUP && len(bytes) >= 5 && bytes[0] == byte(snet.IReady) {
+        ws.physicsPort = int(snet.Read_uint32(bytes[1:]))
+        log.Printf("Accepting player connections...")
+      } else {
+        // _ = ws.pool.Submit(func() {
+        //   if len(data) >= 4 {
+        //     msg := snet.GetNetworkMsgFromData(data)
+        //     if msg != nil {
+        //       responseMsg := interpret(*msg, c)
+        //       c.ResetBuffer();
 
-      //       if responseMsg != nil {
-      //         response := snet.GetDataFromNetworkMsg(responseMsg)
-      //         if response != nil {
-      //           log.Printf("[%s] React <- %d", c.RemoteAddr().String(), responseMsg.Size)
-      //           c.AsyncWrite(responseMsg.SizeBytes())
-      //           c.AsyncWrite(responseMsg.Data)
-      //         }
-      //       }
-      //     }
-      //   }
-      // })
-    }
-  })
+        //       if responseMsg != nil {
+        //         response := snet.GetDataFromNetworkMsg(responseMsg)
+        //         if response != nil {
+        //           log.Printf("[%s] React <- %d", c.RemoteAddr().String(), responseMsg.Size)
+        //           c.AsyncWrite(responseMsg.SizeBytes())
+        //           c.AsyncWrite(responseMsg.Data)
+        //         }
+        //       }
+        //     }
+        //   }
+        // })
+      }
+    })
+  }
 
   return
 }

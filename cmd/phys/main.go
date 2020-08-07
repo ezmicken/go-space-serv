@@ -186,7 +186,6 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
   var mapBuf []byte = nil
   var mapBufRead uint32 = 0
   var totalBytesRead int = 0
-  //var mapBufRead uint32 = 0
   reader := bufio.NewReader(c)
 
   for ps.state <= snet.ALIVE {
@@ -233,9 +232,10 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
           }
         case readingMap:
           log.Printf("reading map bytes")
-          for b, err := reader.ReadByte(); err == nil && mapBufRead < numBlockBytes; mapBufRead++ {
-            mapBuf[mapBufRead] = b
+          for b, err := reader.Peek(1); err == nil && mapBufRead < numBlockBytes; mapBufRead++ {
+            mapBuf[mapBufRead] = b[0]
             totalBytesRead += 1
+            reader.Discard(1)
           }
           log.Printf("total bytes %d", totalBytesRead)
           if err == nil {
