@@ -1,10 +1,13 @@
 package world
 
 import (
+  "encoding/binary"
+
   "github.com/ojrac/opensimplex-go"
 
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/tcp"
+  "go-space-serv/internal/space/util"
 )
 
 type WorldMap struct {
@@ -12,13 +15,14 @@ type WorldMap struct {
   H int
   Seed int64
   Resolution int
+  ChunkSize int
   SpawnX int
   SpawnY int
 
   blocks [][]BlockType
 }
 
-var viewSize int = 50
+var viewSize int = 16
 
 func (wm *WorldMap) Generate() {
   noise := opensimplex.New(wm.Seed)
@@ -33,7 +37,7 @@ func (wm *WorldMap) Generate() {
     for x := 0; x < wm.W; x++ {
       floatVal := noise.Eval2(float64(x) * 0.05, float64(y) * 0.05)
       if floatVal > 0.36 {
-        wm.blocks[y][x] = SOLID
+        wm.blocks[y][x] = GRAY
       } else {
         wm.blocks[y][x] = EMPTY
       }
@@ -78,39 +82,59 @@ func (wm *WorldMap) SerializeInfo() (out *tcp.NetworkMsg) {
   return &msg
 }
 
-func (wm *WorldMap) Serialize() (out *tcp.NetworkMsg) {
-  var msg tcp.NetworkMsg
+func (wm *WorldMap) Serialize() []byte {
+  numBlocks := wm.W * wm.H
 
-  msg.PutUint32(wm.W)
-  msg.PutUint32(wm.H)
-  msg.PutByte(byte(wm.Resolution))
+  // map + bytes.length(uint32) + width(uint32) + height(uint32) + resolution(byte)
+  bytes := make([]byte, (numBlocks/8) + 4 + 1)
+  binary.LittleEndian.PutUint32(bytes[:4], uint32(numBlocks/8))
+  bytes[4] = byte(wm.Resolution)
 
-  for y := 0; y < wm.H; y++ {
-    for x := 0; x < wm.W; x++ {
-      msg.PutByte(byte(wm.blocks[y][x]))
+  x := 0
+  y := 0
+  currentByte := 5
+  currentBit := 0
+  for i := 0; i < numBlocks; i++ {
+    if wm.blocks[y][x] != EMPTY {
+      bytes[currentByte] |= (1 << currentBit)
+    }
+
+    currentBit++
+    if currentBit > 7 {
+      currentBit = 0
+      currentByte++
+    }
+
+    x++
+    if x >= wm.W {
+      x = 0
+      y++
     }
   }
 
-  return &msg
+  return bytes
 }
 
 
-func (wm *WorldMap) Deserialize(bytes []byte, includesDimensions bool) {
-  if includesDimensions {
-    wm.W = snet.Read_int32(bytes[:4])
-    wm.H = snet.Read_int32(bytes[4:8])
-    wm.Resolution = int(bytes[8])
-  }
-
+func (wm *WorldMap) Deserialize(bytes []byte) {
   wm.blocks = make([][]BlockType, wm.H)
   for i := range wm.blocks {
     wm.blocks[i] = make([]BlockType, wm.W)
   }
 
-  i := 0
-  for y := 0; y < wm.H; y++ {
-    for x := 0; x < wm.W; x++ {
-      wm.blocks[y][x] = BlockType(bytes[i])
+  x := 0
+  y := 0
+  for currentByte := 0; y < wm.H; currentByte++ {
+    for currentBit := 0; currentBit < 8; currentBit++ {
+      if helpers.BitOn(bytes[currentByte], currentBit) {
+        wm.blocks[y][x] = GRAY
+      }
+
+      x++
+      if x >= wm.W {
+        x = 0
+        y++
+      }
     }
   }
 }

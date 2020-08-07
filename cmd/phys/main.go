@@ -10,15 +10,13 @@ import (
   "context"
   "os"
   "os/signal"
-  //"runtime"
-  //"runtime/debug"
+  "encoding/binary"
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
 
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/udp"
-  "go-space-serv/internal/space/snet/tcp"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/player"
@@ -60,7 +58,9 @@ type physicsServer struct {
   pool                *goroutine.Pool
 
   // World map data
-  worldConn           net.Conn
+  worldConn           *net.TCPConn
+  worldLaddr          *net.TCPAddr
+  worldRaddr          *net.TCPAddr
   worldConnOpen       bool
   worldMap            world.WorldMap
   worldMapBytes       []byte
@@ -93,6 +93,15 @@ func main() {
     worldConnOpen: false,
   }
 
+  ps.worldLaddr = &net.TCPAddr{
+    IP: net.ParseIP("127.0.0.1"),
+    Port: 9499,
+  }
+  ps.worldRaddr = &net.TCPAddr{
+    IP: net.ParseIP("127.0.0.1"),
+    Port: 9494,
+  }
+
   rand.Seed(time.Now().UnixNano())
 
   // Start listening for operating system signals
@@ -115,7 +124,7 @@ func (ps *physicsServer) live() {
   ps.state = snet.WAIT_WORLD
 
   waitWorld.Add(1)
-  go ps.world(&waitWorld)
+  go ps.world(&waitWorld, ps.worldLaddr, ps.worldRaddr)
   waitWorld.Wait()
 
   go ps.serve("udp://:9495")
@@ -148,22 +157,17 @@ func (ps *physicsServer) serve(udpAddr string) {
 }
 
 // world server <-> physics server interaction
-func (ps *physicsServer) world(wg *sync.WaitGroup) {
+func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
   ps.lifeWG.Add(1)
   defer ps.lifeWG.Done()
 
-  // connect via TCP to the world server
-  dialer := &net.Dialer{
-    LocalAddr: &net.TCPAddr{
-      IP:   net.ParseIP("127.0.0.1"),
-      Port: 9499,
-    },
-  }
-  c, err := dialer.Dial("tcp", "127.0.0.1:9494")
+  c, err := net.DialTCP("tcp", laddr, raddr)
   if err != nil {
     log.Printf("%s", err)
     panic("couldnt find world server")
   }
+
+  c.SetNoDelay(true)
 
   ps.worldConn = c
   ps.worldConnOpen = true
@@ -171,17 +175,18 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
 
   const(
     readingSize byte = iota
-    readingWidth
-    readingHeight
     readingResolution
     readingMap
     readingEvent
   )
 
   var state byte = readingSize
-  var size int = 0
+  var numBlockBytes uint32 = 0
+  var size uint32 = 0
   var mapBuf []byte = nil
-  var mapBufRead int = 0
+  var mapBufRead uint32 = 0
+  var totalBytesRead int = 0
+  //var mapBufRead uint32 = 0
   reader := bufio.NewReader(c)
 
   for ps.state <= snet.ALIVE {
@@ -194,38 +199,21 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
         case readingSize:
           sizeBytes, err := reader.Peek(4)
           if err == nil {
-            size = snet.Read_int32(sizeBytes)
-            mapBuf = make([]byte, size - 4 - 4)
+            numBlockBytes = snet.Read_uint32(sizeBytes)
+            size = helpers.Sqrt_uint32(numBlockBytes * 8)
+            mapBuf = make([]byte, numBlockBytes)
+
+            ps.worldMap.W = int(size)
+            ps.worldMap.H = int(size)
 
             reader.Discard(4)
-
-            state = readingWidth
-            log.Printf("Read worldMap data length=%d", size)
-          } else {
-            log.Printf(err.Error())
-          }
-        case readingWidth:
-          widthBytes, err := reader.Peek(4)
-          if err == nil {
-            ps.worldMap.W = snet.Read_int32(widthBytes)
-
-            reader.Discard(4)
-
-            state = readingHeight
-            log.Printf("Read worldMap width=%d", ps.worldMap.W)
-          } else {
-            log.Printf(err.Error())
-          }
-        case readingHeight:
-          heightBytes, err := reader.Peek(4)
-          if err == nil {
-            ps.worldMap.H = snet.Read_int32(heightBytes)
-
-            reader.Discard(4)
+            totalBytesRead += 4
 
             state = readingResolution
-            log.Printf("Read worldMap height=%d", ps.worldMap.H)
+            log.Printf("Read worldMap size=%d", size)
           } else {
+            wg.Done()
+            ps.cancel()
             log.Printf(err.Error())
           }
         case readingResolution:
@@ -234,44 +222,56 @@ func (ps *physicsServer) world(wg *sync.WaitGroup) {
             ps.worldMap.Resolution = int(resBytes[0])
 
             reader.Discard(1)
+            totalBytesRead += 1
 
             state = readingMap
             log.Printf("Read worldMap resolution=%d", ps.worldMap.Resolution)
           } else {
+            wg.Done()
+            ps.cancel()
             log.Printf(err.Error())
           }
         case readingMap:
-          for b, err := reader.Peek(1); err == nil && mapBufRead < size - 4 - 4 - 1; {
-            mapBuf[mapBufRead] = b[0]
-            mapBufRead++
-            reader.Discard(1)
+          log.Printf("reading map bytes")
+          for b, err := reader.ReadByte(); err == nil && mapBufRead < numBlockBytes; mapBufRead++ {
+            mapBuf[mapBufRead] = b
+            totalBytesRead += 1
           }
-
-          if mapBufRead == size - 4 - 4 - 1 {
-            ps.worldMap.Deserialize(mapBuf, false)
-
+          log.Printf("total bytes %d", totalBytesRead)
+          if err == nil {
+            log.Printf("finished reading %d/%d blocks", mapBufRead, numBlockBytes)
+            ps.worldMap.Deserialize(mapBuf)
             reader.Reset(c)
 
             state = readingEvent
-            log.Printf("Read worldMap bytes")
 
-            var msg tcp.NetworkMsg
-            msg.PutByte(byte(snet.IReady))
-            msg.PutUint32(udpPort)
-            c.Write(snet.GetDataFromNetworkMsg(&msg))
+            // Tell world about our port and that we're ready.
+            portMsg := make([]byte, 5)
+            portMsg[0] = byte(snet.IReady)
+            binary.LittleEndian.PutUint32(portMsg[1:5], uint32(udpPort))
+            c.Write(portMsg)
 
+            // Start the simulation
             ps.sim.Start(&ps.worldMap, &ps.players);
+
+            // Finish waiting so main can start listening for connections.
             wg.Done()
+          } else {
+            log.Printf("%s", err.Error())
+            wg.Done()
+            ps.cancel()
           }
         case readingEvent:
           eventSizeBytes, err := reader.Peek(4)
           if err == nil {
-            log.Printf("Received event from world")
+            log.Printf("Received event from world %d", len(eventSizeBytes))
             eventSize := snet.Read_int32(eventSizeBytes)
+            log.Printf("%d", eventSize)
             reader.Discard(4)
 
             eventContent, err2 := reader.Peek(eventSize)
             if err2 == nil {
+              log.Printf("event stuff %d", len(eventContent))
               if eventContent[0] == byte(snet.IJoin) {
                 playerIdLenBytes := eventContent[1:3]
                 playerIdLen := snet.Read_uint16(playerIdLenBytes)

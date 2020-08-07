@@ -61,3 +61,30 @@ func BitString(bytes []byte) string {
 
   return dbg
 }
+
+// Thanks Craig McQueen
+// https://stackoverflow.com/questions/1100090/looking-for-an-efficient-integer-square-root-algorithm-for-arm-thumb2
+func Sqrt_uint32(op uint32) uint32 {
+  res := uint32(0)
+  one64 := uint64(1)
+  one := uint32(one64 << 30)
+
+  for one > op {
+    one >>= 2
+  }
+
+  for one != 0 {
+    if op >= res + one {
+      op = op - (res + one)
+      res = res + 2 * one
+    }
+    res >>= 1
+    one >>= 2
+  }
+
+  if op > res {
+    res++
+  }
+
+  return res
+}
