@@ -4,7 +4,8 @@ import (
   "sync"
   "log"
 
-  "go-space-serv/internal/space/player"
+  "github.com/panjf2000/gnet"
+
   "go-space-serv/internal/space/snet/tcp"
 )
 
@@ -13,17 +14,16 @@ type WorldPlayers struct {
   playerMap sync.Map
 }
 
-func (p *WorldPlayers) Add(id string, stats *player.PlayerStats) *tcp.TCPPlayer {
-  // plr := tcp.NewTCPPlayer(id)
-  // plr.SetStats(stats)
+func (p *WorldPlayers) Add(c gnet.Conn) (plr *tcp.TCPPlayer, id string) {
+  plr = tcp.NewTCPPlayer(c)
+  id = plr.GetPlayerId()
 
-  // _, exists := p.playerMap.LoadOrStore(id, plr)
-  // if !exists {
-  //   p.Count += 1
-  // }
+  _, exists := p.playerMap.LoadOrStore(id, plr)
+  if !exists {
+    p.Count += 1
+  }
 
-  // return plr
-  return nil
+  return
 }
 
 func (p *WorldPlayers) Remove(id string) {
@@ -40,40 +40,30 @@ func (p *WorldPlayers) GetPlayer(id string) *tcp.TCPPlayer {
   return nil
 }
 
-func (p *WorldPlayers) AddMsg(msg tcp.TCPMsg, playerId string) {
+func (p *WorldPlayers) Push(playerId string, msg tcp.TCPMsg) {
   plr := p.GetPlayer(playerId)
   if plr != nil && plr.GetState() >= tcp.CONNECTED {
-    plr.AddMsg(msg)
+    plr.Push(msg)
   } else {
-    log.Printf("Tried to add msg to player %s who doesnt exist", playerId)
+    log.Printf("Tried to push msg to player %s who doesnt exist", playerId)
   }
 }
 
-func (p *WorldPlayers) AddMsgAll(msg tcp.TCPMsg) {
+func (p *WorldPlayers) PushAll(msg tcp.TCPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
     plr := value.(*tcp.TCPPlayer)
     if plr.GetState() >= tcp.CONNECTED {
-      plr.AddMsg(msg);
+      plr.Push(msg);
     }
     return true
   })
 }
 
-func (p *WorldPlayers) AddMsgExcluding(msg tcp.TCPMsg, playerId string) {
+func (p *WorldPlayers) PushAllExcluding(playerId string, msg tcp.TCPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
     plr := value.(*tcp.TCPPlayer)
     if plr.GetState() >= tcp.CONNECTED && plr.GetPlayerId() != playerId {
-      plr.AddMsg(msg);
-    }
-    return true
-  })
-}
-
-func (p *WorldPlayers) PackAndSend() {
-  p.playerMap.Range(func(key, value interface{}) bool {
-    plr := value.(*tcp.TCPPlayer)
-    if plr.GetState() >= tcp.CONNECTED {
-      //plr.PackAndSend()
+      plr.Push(msg);
     }
     return true
   })
