@@ -8,6 +8,7 @@ import (
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/tcp"
   "go-space-serv/internal/space/util"
+  "go-space-serv/internal/space/world/msg"
 )
 
 type WorldMap struct {
@@ -70,6 +71,38 @@ func (wm *WorldMap) GetCellCenter(x, y int) (xPos, yPos float32) {
   xPos = float32(wm.Resolution * x + (wm.Resolution / 2))
   yPos = float32(wm.Resolution * y + (wm.Resolution / 2))
   return
+}
+
+func (wm *WorldMap) SerializeChunk(id uint16) msg.BlocksMsg {
+  x := int(id) % wm.W * wm.ChunkSize
+  y := int(id) / wm.W * wm.ChunkSize
+
+  var blocksMsg msg.BlocksMsg
+  blocksMsg.Id = id
+
+  currentState := wm.blocks[y][x]
+  var newState BlockType
+  currentCount := 0
+  blocksMsg.Data = []byte{byte(currentState)}
+
+  for yi := 0; yi < wm.ChunkSize; yi++ {
+    for xi := 0; xi < wm.ChunkSize; xi++ {
+      newState = wm.blocks[y+yi][x+xi]
+      if newState == currentState {
+        currentCount++
+      } else {
+        currentState = newState
+        blocksMsg.Data = append(blocksMsg.Data, []byte{byte(currentCount), byte(currentState)}...)
+        currentCount = 1
+      }
+    }
+  }
+
+  if currentCount > 0 {
+    blocksMsg.Data = append(blocksMsg.Data, byte(currentCount))
+  }
+
+  return blocksMsg
 }
 
 func (wm *WorldMap) SerializeInfo() (out *tcp.NetworkMsg) {
