@@ -9,12 +9,14 @@ type CmdMsg struct {
 }
 
 func (msg *CmdMsg) Deserialize(packet []byte, head int) int {
-  msg.cmd = udp.UDPCmd(packet[head])
-  return head++
+  msg.cmd = tcp.TCPCmd(packet[head])
+  head++
+  return head
 }
-func (msg *CmdMsg) Serialize(packet []byte, head) int {
+func (msg *CmdMsg) Serialize(packet []byte, head int) int {
   packet[head] = byte(msg.cmd)
-  return head++
+  head++
+  return head
 }
 func (msg *CmdMsg) GetCmd() tcp.TCPCmd { return msg.cmd }
 func (msg *CmdMsg) SetCmd(c tcp.TCPCmd) { msg.cmd = c  }

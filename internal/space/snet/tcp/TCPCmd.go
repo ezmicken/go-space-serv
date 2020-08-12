@@ -5,10 +5,11 @@ package tcp
 type TCPCmd byte
 
 const (
-  PING TCPCmd = iota
+  PING TCPCmd = iota + 1
   PONG
   WORLD_INFO
   PLAYER_INFO
+  SIM_INFO
   JOIN
   LEAVE
   BLOCKS

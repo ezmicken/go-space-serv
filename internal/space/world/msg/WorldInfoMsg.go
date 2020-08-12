@@ -17,8 +17,9 @@ func (msg *WorldInfoMsg) Serialize(packet []byte, head int) int {
   binary.LittleEndian.PutUint32(packet[head:head+4], msg.Size)
   head += 4
   packet[head] = msg.Res
-  return head++
+  head++
+  return head
 }
-func (msg *WorldInfoMsg) Deserialize(packet []byte, head int) int {}
+func (msg *WorldInfoMsg) Deserialize(packet []byte, head int) int { return 0 }
 
 
