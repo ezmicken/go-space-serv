@@ -33,8 +33,8 @@ func (s *Simulation) Start(worldMap *world.WorldMap, players *udp.UDPPlayers) {
   s.seq = 0
   s.lastSync = 0
   s.framesSinceLastSync = 0
-  s.worldMap.SpawnX = 500
-  s.worldMap.SpawnY = 500
+  s.worldMap.SpawnX = 1600
+  s.worldMap.SpawnY = 0
   go s.loop()
 }
 
