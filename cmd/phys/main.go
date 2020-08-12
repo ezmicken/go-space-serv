@@ -50,7 +50,7 @@ type physicsServer struct {
 
   players             udp.UDPPlayers
   sim                 phys.Simulation
-  msgFactory          phys.MsgFactory
+  msgFactory          phys.SimMsgFactory
   ipsToPlayers        sync.Map
 
   launchTime          int64
@@ -262,46 +262,67 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             ps.cancel()
           }
         case readingEvent:
-          eventSizeBytes, err := reader.Peek(4)
+          event, err := reader.Peek(1)
           if err == nil {
-            log.Printf("Received event from world %d", len(eventSizeBytes))
-            eventSize := snet.Read_int32(eventSizeBytes)
-            log.Printf("%d", eventSize)
-            reader.Discard(4)
+            log.Printf("Received event from world %d", event)
+            reader.Discard(1)
 
-            eventContent, err2 := reader.Peek(eventSize)
-            if err2 == nil {
-              log.Printf("event stuff %d", len(eventContent))
-              if eventContent[0] == byte(snet.IJoin) {
-                playerIdLenBytes := eventContent[1:3]
-                playerIdLen := snet.Read_uint16(playerIdLenBytes)
-                playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
-                ipLen := snet.Read_uint16(eventContent[3+playerIdLen:3+playerIdLen+2])
-                ipString := snet.Read_utf8(eventContent[3+playerIdLen+2:3+playerIdLen+2+ipLen])
-                plr := ps.players.Add(playerId, player.NewPlayerStats())
-                if plr != nil {
-                  plr.SetSimChan(ps.sim.GetPlayerChan())
-                  plr.SetMsgFactory(&ps.msgFactory)
+            if event[0] == byte(snet.IJoin) {
+              var idLen []byte
+              var idBytes []byte
+              var ipLen []byte
+              var ipBytes []byte
+              idLen, err = reader.Peek(1)
+              if err == nil {
+                reader.Discard(1)
+                idBytes, err = reader.Peek(int(idLen[0]))
+                if err == nil {
+                  playerId := snet.Read_utf8(idBytes)
+                  reader.Discard(int(idLen[0]))
+                  ipLen, err = reader.Peek(1)
+                  if err == nil {
+                    reader.Discard(1)
+                    ipBytes, err = reader.Peek(int(ipLen[0]))
+                    if err == nil {
+                      ip := net.IP(ipBytes)
+                      reader.Discard(int(ipLen[0]))
+
+                      plr := ps.players.Add(playerId, player.NewPlayerStats())
+                      if plr != nil {
+                        plr.SetSimChan(ps.sim.GetPlayerChan())
+                        plr.SetMsgFactory(&ps.msgFactory)
+                        ps.ipsToPlayers.Store(ip.String(), playerId)
+                        log.Printf("Storing %s <-> %s", ip.String(), playerId)
+                      }
+                    }
+                  }
                 }
-                log.Printf("Storing %s <-> %s", ipString, playerId)
-                ps.ipsToPlayers.Store(ipString, playerId);
-              } else if eventContent[0] == byte(snet.ILeave) {
-                playerIdLenBytes := eventContent[1:3]
-                playerIdLen := snet.Read_uint16(playerIdLenBytes)
-                playerId := snet.Read_utf8(eventContent[3:3+playerIdLen])
-                ps.players.Remove(playerId)
-                ps.sim.RemoveControlledBody(playerId)
-              } else if eventContent[0] == byte(snet.IShutdown) {
-                ps.cancel()
               }
+            } else if event[0] == byte(snet.ILeave) {
+              var idLen []byte
+              var idBytes []byte
+              idLen, err = reader.Peek(1)
+              if err == nil {
+                reader.Discard(1)
+                idBytes, err = reader.Peek(int(idLen[0]))
+                if err == nil {
+                  reader.Discard(int(idLen[0]))
+                  playerId := snet.Read_utf8(idBytes)
+                  ps.players.Remove(playerId)
+                  ps.sim.RemoveControlledBody(playerId)
+                }
+              }
+            } else if event[0] == byte(snet.IShutdown) {
+              ps.cancel()
             }
-            reader.Discard(eventSize)
-          } else if err.Error() == "EOF" {
+          }
+
+          if err != nil && err.Error() == "EOF" {
             ps.cancel() // TODO: retry connecting to world
             return
-          } else if ps.state == snet.SHUTDOWN {
+          } else if err != nil && ps.state == snet.SHUTDOWN {
             return
-          } else {
+          } else if err != nil {
             log.Printf("worldConn err: " + err.Error())
           }
       }
