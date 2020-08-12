@@ -15,7 +15,7 @@ type Simulation struct {
   controlledBodies    sync.Map
   allBodies           []*udp.UDPBody
   worldMap            *world.WorldMap
-  players             *udp.UDPPlayers
+  players             *SimPlayers
 
   // Timing
   seq                 uint16      // incremented each simulation frame, sync when rolls over
@@ -26,7 +26,7 @@ type Simulation struct {
   fromPlayers chan    udp.UDPMsg  // incoming msgs from clients (UdpPlayer)
 }
 
-func (s *Simulation) Start(worldMap *world.WorldMap, players *udp.UDPPlayers) {
+func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers) {
   s.players = players
   s.fromPlayers = make(chan udp.UDPMsg, 100)
   s.worldMap = worldMap
@@ -63,7 +63,7 @@ func (s *Simulation) processFrame(frameStart int64) {
             response.Seq = s.seq
             response.Time = uint64(syncTime)
 
-            s.players.AddMsg(&response, playerId)
+            s.players.Push(playerId, &response)
           case udp.ENTER:
             // TODO: verify rtt/ploss limit
             player := s.players.GetPlayer(playerId)
@@ -86,7 +86,7 @@ func (s *Simulation) processFrame(frameStart int64) {
             response.BodyId = pBod.GetId();
             response.X = uint32(spawnX)
             response.Y = uint32(spawnY)
-            s.players.AddMsgAll(&response)
+            s.players.PushAll(&response)
         }
       case *msg.MoveShootMsg:
         m := t
@@ -94,7 +94,7 @@ func (s *Simulation) processFrame(frameStart int64) {
         bod, ok := s.controlledBodies.Load(playerId)
         if ok && bod != nil {
           m.BodyId = bod.(*udp.UDPBody).GetId();
-          s.players.AddMsgExcluding(m, playerId)
+          s.players.PushExcluding(playerId, m)
         }
         break
       default:

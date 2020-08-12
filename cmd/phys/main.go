@@ -48,7 +48,7 @@ type physicsServer struct {
   state               snet.ServerState
   cancel              func()
 
-  players             udp.UDPPlayers
+  players             phys.SimPlayers
   sim                 phys.Simulation
   msgFactory          phys.SimMsgFactory
   ipsToPlayers        sync.Map

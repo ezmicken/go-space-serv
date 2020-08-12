@@ -28,7 +28,7 @@ func (p *WorldPlayers) Add(c gnet.Conn) (plr *tcp.TCPPlayer, id string) {
 
 func (p *WorldPlayers) Remove(id string) {
   p.playerMap.Delete(id)
-  log.Printf("%s left the simulation", id)
+  log.Printf("%s left the world", id)
 }
 
 func (p *WorldPlayers) GetPlayer(id string) *tcp.TCPPlayer {
