@@ -1,12 +1,11 @@
 package tcp
 
 import (
+  "time"
   "log"
+  "encoding/binary"
   "github.com/teris-io/shortid"
-  "github.com/akavel/polyclip-go"
   "github.com/panjf2000/gnet"
-
-  "go-space-serv/internal/space/player"
 )
 
 type TCPPlayerState byte
@@ -17,10 +16,10 @@ const (
   CONNECTED
 )
 
+const packetSize int = 1024
+
 type TCPPlayer struct {
-  explored        polyclip.Polygon
   playerId        string
-  stats           *player.PlayerStats
   connection      gnet.Conn
   factory         TCPMsgFactory
   state           TCPPlayerState
@@ -33,7 +32,7 @@ var sid *shortid.Shortid
 func NewTCPPlayer(conn gnet.Conn) *TCPPlayer {
   var p TCPPlayer
   p.toClient = make(chan TCPMsg, 100)
-  p.stats = player.NewPlayerStats(); // TODO: get this from db
+  p.toWorld = make(chan TCPMsg, 100)
   p.connection = conn
   p.state = DISCONNECTED
 
@@ -56,7 +55,54 @@ func NewTCPPlayer(conn gnet.Conn) *TCPPlayer {
   return &p
 }
 
-func (p *TCPPlayer) AddMsg(m TCPMsg) {
+func (p *TCPPlayer) Connected() {
+  p.state = CONNECTED
+  go p.Tx()
+}
+
+func (p *TCPPlayer) Tx() {
+  packet := make([]byte, packetSize)
+  head := 2
+
+  for {
+    if p.state == DISCONNECTED {
+      log.Printf("disconnected")
+      break
+    }
+    for {
+      var m TCPMsg
+      fin := false
+      select {
+      case m = <- p.toClient:
+        head = m.Serialize(packet, head)
+        if head >= packetSize {
+          log.Printf("packet is max size")
+          fin = true
+        }
+      default:
+        fin = true
+      }
+
+      if fin {
+        break
+      }
+    }
+
+    if head > 2 {
+      binary.LittleEndian.PutUint16(packet[0:2], uint16(head - 2))
+      p.connection.AsyncWrite(packet[:head])
+      head = 2
+      packet = make([]byte, packetSize)
+      time.Sleep(500 * time.Millisecond)
+    }
+  }
+}
+
+func (p *TCPPlayer) Rx() {
+
+}
+
+func (p *TCPPlayer) Push(m TCPMsg) {
   select {
   case p.toClient <- m:
   default:
@@ -78,14 +124,6 @@ func (p *TCPPlayer) GetPlayerId() string {
 
 func (p *TCPPlayer) GetState() TCPPlayerState {
   return p.state
-}
-
-func (p *TCPPlayer) GetPlayerStats() *player.PlayerStats {
-  return p.stats;
-}
-
-func (p *TCPPlayer) InitExploredPoly(xMin, xMax, yMin, yMax float64) {
-  p.explored = polyclip.Polygon{{{X: xMin, Y: yMin}, {X: xMax, Y: yMin}, {X: xMax, Y: yMax}, {X: xMax, Y: yMin}}}
 }
 
 func (p *TCPPlayer) GetConnection() gnet.Conn {
