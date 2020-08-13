@@ -1,4 +1,4 @@
-package phys
+package sim
 
 import (
   "log"
@@ -7,7 +7,7 @@ import (
 
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
-  "go-space-serv/internal/space/phys/msg"
+  "go-space-serv/internal/space/sim/msg"
   "go-space-serv/internal/space/snet/udp"
 )
 

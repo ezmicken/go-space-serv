@@ -20,7 +20,7 @@ import (
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/player"
-  "go-space-serv/internal/space/phys"
+  "go-space-serv/internal/space/sim"
 )
 
 const cmdLen            int     = 1
@@ -48,9 +48,9 @@ type physicsServer struct {
   state               snet.ServerState
   cancel              func()
 
-  players             phys.SimPlayers
-  sim                 phys.Simulation
-  msgFactory          phys.SimMsgFactory
+  players             sim.SimPlayers
+  simulation          sim.Simulation
+  msgFactory          sim.SimMsgFactory
   ipsToPlayers        sync.Map
 
   launchTime          int64
@@ -252,7 +252,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             c.Write(portMsg)
 
             // Start the simulation
-            ps.sim.Start(&ps.worldMap, &ps.players);
+            ps.simulation.Start(&ps.worldMap, &ps.players);
 
             // Finish waiting so main can start listening for connections.
             wg.Done()
@@ -289,7 +289,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
 
                       plr := ps.players.Add(playerId, player.NewPlayerStats())
                       if plr != nil {
-                        plr.SetSimChan(ps.sim.GetPlayerChan())
+                        plr.SetSimChan(ps.simulation.GetPlayerChan())
                         plr.SetMsgFactory(&ps.msgFactory)
                         ps.ipsToPlayers.Store(ip.String(), playerId)
                         log.Printf("Storing %s <-> %s", ip.String(), playerId)
@@ -309,7 +309,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
                   reader.Discard(int(idLen[0]))
                   playerId := snet.Read_utf8(idBytes)
                   ps.players.Remove(playerId)
-                  ps.sim.RemoveControlledBody(playerId)
+                  ps.simulation.RemoveControlledBody(playerId)
                 }
               }
             } else if event[0] == byte(snet.IShutdown) {

@@ -1,7 +1,7 @@
-package phys
+package sim
 
 import(
-  "go-space-serv/internal/space/phys/msg"
+  "go-space-serv/internal/space/sim/msg"
   "go-space-serv/internal/space/snet/udp"
 )
 
