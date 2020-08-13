@@ -5,8 +5,6 @@ import (
 
   "github.com/ojrac/opensimplex-go"
 
-  "go-space-serv/internal/space/snet"
-  "go-space-serv/internal/space/snet/tcp"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world/msg"
 )
@@ -103,16 +101,6 @@ func (wm *WorldMap) SerializeChunk(id uint16) msg.BlocksMsg {
   }
 
   return blocksMsg
-}
-
-func (wm *WorldMap) SerializeInfo() (out *tcp.NetworkMsg) {
-  var msg tcp.NetworkMsg
-
-  msg.PutByte(byte(snet.SWorldInfo))
-  msg.PutUint32(wm.W)
-  msg.PutUint32(wm.H)
-
-  return &msg
 }
 
 func (wm *WorldMap) Serialize() []byte {
