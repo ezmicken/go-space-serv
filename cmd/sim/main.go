@@ -1,6 +1,7 @@
 package main
 
 import (
+  "flag"
   "log"
   "time"
   "net"
@@ -11,6 +12,7 @@ import (
   "os"
   "os/signal"
   "encoding/binary"
+  "runtime/pprof"
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
@@ -67,9 +69,24 @@ type physicsServer struct {
   worldMapLen         int
 }
 
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 func main() {
   p := goroutine.Default()
   defer p.Release()
+
+  flag.Parse()
+  if *cpuprofile != "" {
+    f, err := os.Create(*cpuprofile)
+    if err != nil {
+      log.Fatal(err)
+    }
+    defer f.Close()
+    if err = pprof.StartCPUProfile(f); err != nil {
+      log.Fatal("could not start CPU profile: ", err)
+    }
+    defer pprof.StopCPUProfile()
+  }
 
   // Populate config
   // TODO: take this from flags
@@ -188,12 +205,15 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
   var totalBytesRead int = 0
   reader := bufio.NewReader(c)
 
+  ticker := time.NewTicker(time.Duration(250) * time.Millisecond)
+  defer ticker.Stop()
+
   for ps.state <= snet.ALIVE {
     select {
     case <-ps.ctx.Done():
       log.Printf("Closing world connection...")
       return
-    default:
+    case <- ticker.C:
       switch state {
         case readingSize:
           sizeBytes, err := reader.Peek(4)
@@ -326,7 +346,6 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             log.Printf("worldConn err: " + err.Error())
           }
       }
-      time.Sleep(250 * time.Millisecond)
     }
   }
 }

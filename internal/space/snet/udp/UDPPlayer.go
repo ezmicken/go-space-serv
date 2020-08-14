@@ -129,6 +129,9 @@ func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
     close(p.spamChan)
   }
 
+  ticker := time.NewTicker(time.Duration(rate) * time.Millisecond)
+  defer ticker.Stop()
+
   log.Printf("sending first %d", msg[4])
   p.connection.SendTo(msg)
 
@@ -147,7 +150,7 @@ func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
 
       log.Printf("sending %d (iteration %d)", msg[4], i)
       p.connection.SendTo(msg)
-      time.Sleep(time.Duration(rate) * time.Millisecond)
+      <- ticker.C
     }
 
     log.Printf("Player.sendRepeating finished all iterations.")

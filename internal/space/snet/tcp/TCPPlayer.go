@@ -63,6 +63,8 @@ func (p *TCPPlayer) Connected() {
 func (p *TCPPlayer) Tx() {
   packet := make([]byte, packetSize)
   head := 2
+  ticker := time.NewTicker(time.Duration(500) * time.Millisecond)
+  defer ticker.Stop()
 
   for {
     if p.state == DISCONNECTED {
@@ -93,8 +95,9 @@ func (p *TCPPlayer) Tx() {
       p.connection.AsyncWrite(packet[:head])
       head = 2
       packet = make([]byte, packetSize)
-      time.Sleep(500 * time.Millisecond)
     }
+
+    <- ticker.C
   }
 }
 

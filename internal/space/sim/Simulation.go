@@ -24,6 +24,7 @@ type Simulation struct {
   framesSinceLastSync int64       // simulation frames since last sync
 
   fromPlayers chan    udp.UDPMsg  // incoming msgs from clients (UdpPlayer)
+  ticker              *time.Ticker
 }
 
 func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers) {
@@ -35,6 +36,7 @@ func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers) {
   s.framesSinceLastSync = 0
   s.worldMap.SpawnX = 1600
   s.worldMap.SpawnY = 0
+  s.ticker = time.NewTicker(time.Duration(helpers.GetConfiguredTimestepNanos()) * time.Nanosecond)
   go s.loop()
 }
 
@@ -123,16 +125,20 @@ func (s *Simulation) processFrame(frameStart int64) {
 // Determines when to process frames.
 // Processes input not related to controlled bodies
 func (s *Simulation) loop() {
+  defer s.ticker.Stop()
   simulationStart := time.Now().UnixNano()
   s.lastSync = simulationStart
   s.seq = 0
   shouldSync := false
   timestepNano := helpers.GetConfiguredTimestepNanos()
+  var frameStartTime time.Time
+  var frameStart int64
+  var framesToProcess int64
 
   for {
-    frameStartTime := time.Now()
-    frameStart := frameStartTime.UnixNano()
-    framesToProcess := ((frameStart - s.lastSync) / timestepNano) - int64(s.seq)
+    frameStartTime = <- s.ticker.C
+    frameStart = frameStartTime.UnixNano()
+    framesToProcess = ((frameStart - s.lastSync) / timestepNano) - int64(s.seq)
     if framesToProcess > 0 {
       for i := int64(0); i < framesToProcess; i++ {
         s.seq++
@@ -147,8 +153,7 @@ func (s *Simulation) loop() {
     } else if shouldSync {
       shouldSync = false
     }
-
-    time.Sleep(32)
+    framesToProcess = 0
   }
 }
 
