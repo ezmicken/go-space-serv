@@ -4,18 +4,18 @@ import (
   "time"
 )
 
-func PerSecondOverTime(stat float32, dur ...int64) float32 {
-  if len(dur) > 1 {
-    return stat * float32(dur[1] - dur[0]) / float32(1000)
-  } else {
-    return stat * (float32(dur[0]) / float32(1000))
-  }
+func PerSecondOverTime(stat float32, dur int64) float32 {
+  return stat * (float32(dur) / float32(1000))
 }
 
 func WrapFloat32(val, min, length float32) float32 {
   for val >= length { val -= length }
   for val < min { val += length }
   return val;
+}
+
+func WrapAngle(val float32) float32 {
+  return WrapFloat32(val, 0, 360)
 }
 
 func WrapInt(val, min, length int) int {
