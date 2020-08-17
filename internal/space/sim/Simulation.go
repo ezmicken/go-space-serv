@@ -5,6 +5,8 @@ import (
   "sync"
   "time"
 
+  "github.com/go-gl/mathgl/mgl32"
+
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/sim/msg"
@@ -44,7 +46,7 @@ func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers) {
 //   - process incoming messages fom players
 //   - produce outgoing messages for players
 //   - instruct UDPPlayer to pack and send messages
-func (s *Simulation) processFrame(frameStart int64) {
+func (s *Simulation) processFrame(frameStart int64, seq int) {
   // Process incoming messages from players
   for j := 0; j < 50; j++ {
     tmp := s.pullFromPlayers()
@@ -77,15 +79,22 @@ func (s *Simulation) processFrame(frameStart int64) {
             spawnX := s.worldMap.SpawnX
             spawnY := s.worldMap.SpawnY
             x, y := s.worldMap.GetCellCenter(spawnX, spawnY)
-            pBod := udp.NewControlledBody(player)
-            pBod.SetPos(x, y)
+            pBod := NewControlledBody(player)
+            var ht HistoricalTransform
+            ht.Seq = int(s.seq)
+            ht.Angle = 0
+            ht.AngleDelta = 0
+            ht.Position = mgl32.Vec3{x, y, 0}
+            ht.Velocity = mgl32.Vec3{0, 0, 0}
+            ht.VelocityDelta = mgl32.Vec3{0, 0, 0}
+            pBod.Initialize(ht)
             s.addControlledBody(playerId, pBod)
 
             log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
 
             var response msg.EnterMsg
             response.PlayerId = player.GetName()
-            response.BodyId = pBod.GetId();
+            response.BodyId = pBod.GetBody().Id
             response.X = uint32(spawnX)
             response.Y = uint32(spawnY)
             s.players.PushAll(&response)
@@ -93,15 +102,26 @@ func (s *Simulation) processFrame(frameStart int64) {
       case *msg.MoveShootMsg:
         m := t
         playerId := m.GetPlayerId()
-        bod, ok := s.controlledBodies.Load(playerId)
-        if ok && bod != nil {
-          m.BodyId = bod.(*udp.UDPBody).GetId();
+
+        // TODO: validate input
+        b, ok := s.controlledBodies.Load(playerId)
+        if ok && b != nil {
+          cb := b.(*ControlledBody)
+          m.BodyId = cb.GetBody().Id;
           s.players.PushExcluding(playerId, m)
+          cb.InputToState(int(m.Tick), m.MoveShoot)
         }
+
         break
       default:
     }
   }
+
+  // Advance the simulation by one step for each controlled body
+  s.controlledBodies.Range(func(key, value interface{}) bool {
+    value.(*ControlledBody).ProcessFrame(frameStart, seq)
+    return true
+  })
 
   // Update all bodies
   // flag dead bodies for removal
@@ -143,7 +163,7 @@ func (s *Simulation) loop() {
       for i := int64(0); i < framesToProcess; i++ {
         s.seq++
         s.lastFrame = s.lastSync + (int64(s.seq) * timestepNano)
-        s.processFrame(s.lastFrame)
+        s.processFrame(s.lastFrame, int(s.seq))
 
         if s.seq == 0 {
           shouldSync = true
@@ -174,15 +194,15 @@ func (s *Simulation) pullFromPlayers() interface{} {
 // Modify
 ///////////
 
-func (s *Simulation) addControlledBody(id string, bod *udp.UDPBody) {
-  s.allBodies = append(s.allBodies, bod)
-  s.controlledBodies.Store(id, bod)
+func (s *Simulation) addControlledBody(id string, cb *ControlledBody) {
+  s.allBodies = append(s.allBodies, cb.GetBody())
+  s.controlledBodies.Store(id, cb)
 }
 
 func (s *Simulation) RemoveControlledBody(id string) {
-  bod, ok := s.controlledBodies.Load(id)
-  if ok && bod != nil {
-    bod.(*udp.UDPBody).Kill()
+  cb, ok := s.controlledBodies.Load(id)
+  if ok && cb != nil {
+    cb.(*ControlledBody).GetBody().Kill()
     s.controlledBodies.Delete(id)
   }
 }
