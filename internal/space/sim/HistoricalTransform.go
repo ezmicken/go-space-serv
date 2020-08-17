@@ -2,17 +2,18 @@ package sim
 
 import(
   "fmt"
+  "github.com/go-gl/mathgl/mgl32"
 )
 
 type HistoricalTransform struct {
-  Timestamp int64
-  Angle float32
-  XPos float32
-  YPos float32
-  XVel float32
-  YVel float32
+  Seq           int
+  Angle         float32
+  AngleDelta    float32
+  Position      mgl32.Vec3
+  Velocity      mgl32.Vec3
+  VelocityDelta mgl32.Vec3
 }
 
 func (ht *HistoricalTransform) String() string {
-  return fmt.Sprintf("[%d] %f deg. xPos: %f yPos: %f xVel: %f yVel: %f", ht.Timestamp, ht.Angle, ht.XPos, ht.YPos, ht.XVel, ht.YVel)
+  return fmt.Sprintf("%v: %v - %v - %v - %v - %v", ht.Seq, ht.Position, ht.Angle, ht.AngleDelta, ht.Velocity, ht.VelocityDelta)
 }
