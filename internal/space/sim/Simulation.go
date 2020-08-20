@@ -6,6 +6,7 @@ import (
   "time"
 
   "github.com/go-gl/mathgl/mgl32"
+  "github.com/google/uuid"
 
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
@@ -26,12 +27,14 @@ type Simulation struct {
   framesSinceLastSync int64       // simulation frames since last sync
 
   fromPlayers chan    udp.UDPMsg  // incoming msgs from clients (UdpPlayer)
+  toWorld chan        byte
   ticker              *time.Ticker
 }
 
 func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers) {
   s.players = players
   s.fromPlayers = make(chan udp.UDPMsg, 100)
+  s.toWorld = make(chan byte, 1024)
   s.worldMap = worldMap
   s.seq = 0
   s.lastSync = 0
@@ -92,12 +95,16 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
 
             log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
 
+            // tell other players
             var response msg.EnterMsg
-            response.PlayerId = player.GetName()
+            response.PlayerId = player.GetPlayerId()
             response.BodyId = pBod.GetBody().Id
             response.X = uint32(spawnX)
             response.Y = uint32(spawnY)
             s.players.PushAll(&response)
+
+            // tell the map server
+
         }
       case *msg.MoveShootMsg:
         m := t
@@ -194,12 +201,12 @@ func (s *Simulation) pullFromPlayers() interface{} {
 // Modify
 ///////////
 
-func (s *Simulation) addControlledBody(id string, cb *ControlledBody) {
+func (s *Simulation) addControlledBody(id uuid.UUID, cb *ControlledBody) {
   s.allBodies = append(s.allBodies, cb.GetBody())
   s.controlledBodies.Store(id, cb)
 }
 
-func (s *Simulation) RemoveControlledBody(id string) {
+func (s *Simulation) RemoveControlledBody(id uuid.UUID) {
   cb, ok := s.controlledBodies.Load(id)
   if ok && cb != nil {
     cb.(*ControlledBody).GetBody().Kill()

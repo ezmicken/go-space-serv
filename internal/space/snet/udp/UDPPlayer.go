@@ -8,6 +8,7 @@ import (
   "encoding/binary"
 
   "github.com/panjf2000/gnet"
+  "github.com/google/uuid"
 
   "go-space-serv/internal/space/player"
   "go-space-serv/internal/space/snet"
@@ -35,7 +36,7 @@ type PacketData struct {
 
 type UDPPlayer struct {
   spamChan          chan struct{}
-  name              string
+  id                uuid.UUID
   active            bool
   lastSync          int64
 
@@ -63,9 +64,9 @@ type UDPPlayer struct {
   stats             *player.PlayerStats
 }
 
-func NewUdpPlayer(n string) *UDPPlayer {
+func NewUdpPlayer(id uuid.UUID) *UDPPlayer {
   var p UDPPlayer
-  p.name = n
+  p.id = id
   p.active = false
   p.state = DISCONNECTED
   p.lastSync = 0
@@ -195,7 +196,7 @@ func (p *UDPPlayer) unpack(packet []byte) {
       p.rxSeq = seq
 
       for head < msgLen {
-        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.toSim, p.name)
+        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.toSim, p.id)
       }
     }
   }
@@ -253,7 +254,7 @@ func (p *UDPPlayer) PackAndSend() {
     msgSize := msg.GetSize()
     if p.packetBufferTail + msgSize >= int(BUFFER_SIZE) {
       p.toClient <- msg
-      log.Printf("%s packetBuffer overflow.", p.name)
+      log.Printf("%v packetBuffer overflow.", p.id)
     }
 
     if !p.packetBufferEmpty {
@@ -320,7 +321,7 @@ func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
       challengeResponse := snet.Read_int64(bytes[5:13])
       if challengeResponse == p.clientSalt ^ p.serverSalt {
         p.state = CONNECTED
-        log.Printf("%s is welcome.", p.name)
+        log.Printf("%v is welcome.", p.id)
         msgBytes := make([]byte, 13)
         binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
         msgBytes[4] = byte(WELCOME)
@@ -328,7 +329,7 @@ func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
         p.sendRepeating(msgBytes, 500, 20)
         p.state = SPECTATING
       } else {
-        log.Printf("%s failed challenge with %d", p.clientSalt ^ p.serverSalt)
+        log.Printf("%v failed challenge with %d", p.id, p.clientSalt ^ p.serverSalt)
       }
     }
 
@@ -344,7 +345,7 @@ func (p *UDPPlayer) AddMsg(m UDPMsg) {
   select {
   case p.toClient <- m:
   default:
-    log.Printf("%s msg queue full. Discarding...", p.name)
+    log.Printf("%v msg queue full. Discarding...", p.id)
   }
 }
 
@@ -356,8 +357,8 @@ func (p *UDPPlayer) SetMsgFactory(factory UDPMsgFactory) {
   p.msgFactory = factory
 }
 
-func (p *UDPPlayer) GetName() string {
-  return p.name
+func (p *UDPPlayer) GetPlayerId() uuid.UUID {
+  return p.id
 }
 
 func (p *UDPPlayer) Activate() {

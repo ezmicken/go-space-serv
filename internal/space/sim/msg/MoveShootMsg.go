@@ -2,13 +2,14 @@ package msg
 
 import(
   "encoding/binary"
+  "github.com/google/uuid"
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/udp"
 )
 
 type MoveShootMsg struct {
   // local
-  playerId string
+  playerId uuid.UUID
 
   // outgoing
   BodyId    uint16
@@ -31,8 +32,8 @@ func (msg *MoveShootMsg) GetSize() int {
   return 6
 }
 
-func (msg *MoveShootMsg) SetPlayerId(id string)   { msg.playerId = id }
-func (msg *MoveShootMsg) GetPlayerId() string     { return msg.playerId }
+func (msg *MoveShootMsg) SetPlayerId(id uuid.UUID)   { msg.playerId = id }
+func (msg *MoveShootMsg) GetPlayerId() uuid.UUID     { return msg.playerId }
 
 func (msg *MoveShootMsg) Serialize(slice []byte) {
   slice[0] = byte(udp.MOVESHOOT)

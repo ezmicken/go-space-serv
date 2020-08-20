@@ -1,6 +1,7 @@
 package sim
 
 import(
+  "github.com/google/uuid"
   "go-space-serv/internal/space/sim/msg"
   "go-space-serv/internal/space/snet/udp"
 )
@@ -9,7 +10,7 @@ import(
 type SimMsgFactory struct {}
 
 // Create msg, deserialize it, publish it, return new head
-func (mf *SimMsgFactory) CreateAndPublishMsg(packet []byte, head int, target chan udp.UDPMsg, playerId string) int {
+func (mf *SimMsgFactory) CreateAndPublishMsg(packet []byte, head int, target chan udp.UDPMsg, playerId uuid.UUID) int {
   cmd := udp.UDPCmd(packet[head])
   if cmd == udp.SYNC {
     m := &msg.CmdMsg{}

@@ -4,7 +4,7 @@ import (
   "time"
   "log"
   "encoding/binary"
-  "github.com/teris-io/shortid"
+  "github.com/google/uuid"
   "github.com/panjf2000/gnet"
 )
 
@@ -19,15 +19,13 @@ const (
 const packetSize int = 1024
 
 type TCPPlayer struct {
-  playerId        string
+  playerId        uuid.UUID
   connection      gnet.Conn
   factory         TCPMsgFactory
   state           TCPPlayerState
   toClient chan   TCPMsg
   toWorld  chan   TCPMsg
 }
-
-var sid *shortid.Shortid
 
 func NewTCPPlayer(conn gnet.Conn) *TCPPlayer {
   var p TCPPlayer
@@ -36,21 +34,8 @@ func NewTCPPlayer(conn gnet.Conn) *TCPPlayer {
   p.connection = conn
   p.state = DISCONNECTED
 
-  if sid == nil {
-    tempsid, err := shortid.New(0, shortid.DefaultABC, 447)
-    if err != nil {
-      panic(err)
-    }
-    sid = tempsid
-  }
-
-  id, err2 := sid.Generate()
-  if err2 != nil {
-    panic(err2)
-  }
-
-  p.playerId = id
-  log.Printf("generated playerId: %s", id)
+  p.playerId = uuid.New()
+  log.Printf("generated playerId: %v", p.playerId)
 
   return &p
 }
@@ -109,7 +94,7 @@ func (p *TCPPlayer) Push(m TCPMsg) {
   select {
   case p.toClient <- m:
   default:
-    log.Printf("%s msg chan full. Discarding...", p.playerId)
+    log.Printf("%v msg chan full. Discarding...", p.playerId)
   }
 }
 
@@ -121,7 +106,7 @@ func (p *TCPPlayer) SetMsgFactory(f TCPMsgFactory) {
   p.factory = f
 }
 
-func (p *TCPPlayer) GetPlayerId() string {
+func (p *TCPPlayer) GetPlayerId() uuid.UUID {
   return p.playerId
 }
 

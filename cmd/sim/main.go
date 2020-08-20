@@ -16,6 +16,7 @@ import (
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
+  "github.com/google/uuid"
 
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/udp"
@@ -288,49 +289,39 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             reader.Discard(1)
 
             if event[0] == byte(snet.IJoin) {
-              var idLen []byte
-              var idBytes []byte
               var ipLen []byte
               var ipBytes []byte
-              idLen, err = reader.Peek(1)
+              var idBytes []byte
+              idBytes, err = reader.Peek(16)
               if err == nil {
-                reader.Discard(1)
-                idBytes, err = reader.Peek(int(idLen[0]))
+                playerId, _ := uuid.FromBytes(idBytes)
+                reader.Discard(16)
+                ipLen, err = reader.Peek(1)
                 if err == nil {
-                  playerId := snet.Read_utf8(idBytes)
-                  reader.Discard(int(idLen[0]))
-                  ipLen, err = reader.Peek(1)
+                  reader.Discard(1)
+                  ipBytes, err = reader.Peek(int(ipLen[0]))
                   if err == nil {
-                    reader.Discard(1)
-                    ipBytes, err = reader.Peek(int(ipLen[0]))
-                    if err == nil {
-                      ip := net.IP(ipBytes)
-                      reader.Discard(int(ipLen[0]))
+                    ip := net.IP(ipBytes)
+                    reader.Discard(int(ipLen[0]))
 
-                      plr := ps.players.Add(playerId, player.NewPlayerStats())
-                      if plr != nil {
-                        plr.SetSimChan(ps.simulation.GetPlayerChan())
-                        plr.SetMsgFactory(&ps.msgFactory)
-                        ps.ipsToPlayers.Store(ip.String(), playerId)
-                        log.Printf("Storing %s <-> %s", ip.String(), playerId)
-                      }
+                    plr := ps.players.Add(playerId, player.NewPlayerStats())
+                    if plr != nil {
+                      plr.SetSimChan(ps.simulation.GetPlayerChan())
+                      plr.SetMsgFactory(&ps.msgFactory)
+                      ps.ipsToPlayers.Store(ip.String(), playerId)
+                      log.Printf("Storing %s <-> %v", ip.String(), playerId)
                     }
                   }
                 }
               }
             } else if event[0] == byte(snet.ILeave) {
-              var idLen []byte
               var idBytes []byte
-              idLen, err = reader.Peek(1)
+              idBytes, err = reader.Peek(16)
               if err == nil {
-                reader.Discard(1)
-                idBytes, err = reader.Peek(int(idLen[0]))
-                if err == nil {
-                  reader.Discard(int(idLen[0]))
-                  playerId := snet.Read_utf8(idBytes)
-                  ps.players.Remove(playerId)
-                  ps.simulation.RemoveControlledBody(playerId)
-                }
+                reader.Discard(16)
+                playerId, _ := uuid.FromBytes(idBytes)
+                ps.players.Remove(playerId)
+                ps.simulation.RemoveControlledBody(playerId)
               }
             } else if event[0] == byte(snet.IShutdown) {
               ps.cancel()
@@ -396,7 +387,7 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
       var plr *udp.UDPPlayer
       playerId, ok := ps.ipsToPlayers.Load(ipString)
       if ok {
-        plr = ps.players.GetPlayer(playerId.(string))
+        plr = ps.players.GetPlayer(playerId.(uuid.UUID))
       }
 
       valid = valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId()

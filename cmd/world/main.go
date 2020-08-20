@@ -11,8 +11,7 @@ import (
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
-
-  //"github.com/akavel/polyclip-go"
+  "github.com/google/uuid"
 
   // integer math
   //"github.com/bxcodec/saint"
@@ -37,8 +36,6 @@ type worldServer struct {
   worldMap          *world.WorldMap
   players           *world.WorldPlayers
   addrToId          sync.Map
-  playerIds         []string
-  playerCount       int
 
   // lifecycle
   ctx               context.Context
@@ -75,8 +72,6 @@ func main() {
     state: snet.WAIT_PHYS,
     worldMap: &wm,
     players: &plrs,
-    playerIds: []string{},
-    playerCount: 0,
     physicsOpen: false,
   }
 
@@ -129,26 +124,8 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   stats.Rotation = 172
   plr, playerId := ws.players.Add(c)
 
-  // Tell client about connected players.
-  if ws.playerCount > 0 {
-    for i := 0; i < ws.playerCount; i++ {
-      var joinMsg msg.PlayerJoinMsg
-      joinMsg.Id = ws.playerIds[i]
-      joinMsg.Stats = stats // TODO: get this from ws.players
-      plr.Push(&joinMsg)
-    }
-  }
-
   addr := c.RemoteAddr().(*net.TCPAddr).IP
   ws.addrToId.Store(addr.String(), playerId)
-  ws.playerIds = append(ws.playerIds, playerId)
-  ws.playerCount++
-
-  // Tell clients about this player.
-  var joinMsg msg.PlayerJoinMsg
-  joinMsg.Id = playerId
-  joinMsg.Stats = stats
-  ws.players.PushAllExcluding(playerId, &joinMsg)
 
   // Tell this client his stats
   var playerInfoMsg msg.PlayerInfoMsg
@@ -170,9 +147,7 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
 
   // Tell the physics server about this client
   packet := []byte{byte(snet.IJoin)}
-  idBytes := []byte(playerId)
-  packet = append(packet, byte(len(idBytes)))
-  packet = append(packet, idBytes...)
+  packet = append(packet, playerId[0:]...)
   packet = append(packet, byte(len(addr)))
   packet = append(packet, addr...)
   ws.physics.AsyncWrite(packet)
@@ -188,34 +163,12 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
 func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
   id, ok := ws.addrToId.Load(c.RemoteAddr().(*net.TCPAddr).IP.String())
   if ok {
-    playerId := id.(string)
+    playerId := id.(uuid.UUID)
     packet := []byte{byte(snet.ILeave)}
-    idBytes := []byte(playerId)
-    packet = append(packet, byte(len(idBytes)))
-    packet = append(packet, idBytes...)
+    packet = append(packet, playerId[0:]...)
     ws.physics.AsyncWrite(packet)
 
-    j := 0
-    for j < ws.playerCount {
-      if ws.playerIds[j] == id {
-        break
-      }
-      j++
-    }
-
-    ws.playerCount--
-
-    if ws.playerCount <= 0 {
-      ws.playerIds = []string{}
-    } else {
-      ws.playerIds = append(ws.playerIds[:j], ws.playerIds[j+1:]...)
-    }
-
     ws.players.Remove(playerId)
-
-    var leaveMsg msg.PlayerLeaveMsg
-    leaveMsg.Id = playerId
-    ws.players.PushAll(&leaveMsg)
   }
 }
 

@@ -2,11 +2,12 @@ package msg
 
 import (
   "encoding/binary"
+  "github.com/google/uuid"
   "go-space-serv/internal/space/snet/udp"
 )
 
 type EnterMsg struct {
-  PlayerId string // 9 - 11 characters
+  PlayerId uuid.UUID // 9 - 11 characters
   BodyId uint16
   X uint32
   Y uint32
@@ -18,12 +19,8 @@ func (msg *EnterMsg) Serialize(bytes []byte) {
   offset := 0
   bytes[offset] = byte(udp.ENTER)
   offset++
-  stringBytes := []byte(msg.PlayerId)
-  playerIdLen := len(stringBytes)
-  bytes[offset] = byte(playerIdLen)
-  offset++
-  copy(bytes[offset:offset+playerIdLen], stringBytes)
-  offset += playerIdLen
+  copy(bytes[offset:offset+16], msg.PlayerId[0:])
+  offset += 16
   binary.LittleEndian.PutUint16(bytes[offset:offset+2], msg.BodyId)
   offset += 2
   binary.LittleEndian.PutUint32(bytes[offset:offset+4], msg.X)
@@ -33,7 +30,7 @@ func (msg *EnterMsg) Serialize(bytes []byte) {
   return
 }
 func (msg *EnterMsg) GetSize() int {
-  return 12 + len(msg.PlayerId)
+  return 26
 }
 
 func (msg *EnterMsg) Deserialize(bytes []byte, head int) int { return head }

@@ -3,13 +3,14 @@ package msg
 import(
   "math"
   "encoding/binary"
+  "github.com/google/uuid"
   "go-space-serv/internal/space/player"
   "go-space-serv/internal/space/snet/tcp"
 )
 
 // Tell the client another client's player info.
 type PlayerJoinMsg struct {
-  Id string
+  Id uuid.UUID
   Stats player.PlayerStats
 }
 
@@ -17,12 +18,8 @@ func (msg *PlayerJoinMsg) GetCmd() tcp.TCPCmd { return tcp.JOIN }
 func (msg *PlayerJoinMsg) Serialize(packet []byte, head int) int {
   packet[head] = byte(tcp.JOIN)
   head++
-  idBytes := []byte(msg.Id)
-  idLen := byte(len(idBytes))
-  packet[head] = idLen
-  head++
-  copy(packet[head:head+int(idLen)], idBytes)
-  head += int(idLen)
+  copy(packet[head:head+16], msg.Id[0:])
+  head += 16
   binary.LittleEndian.PutUint32(packet[head:head+4], math.Float32bits(msg.Stats.Thrust))
   head += 4
   binary.LittleEndian.PutUint32(packet[head:head+4], math.Float32bits(msg.Stats.MaxSpeed))
