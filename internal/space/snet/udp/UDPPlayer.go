@@ -36,7 +36,6 @@ type PacketData struct {
 
 type UDPPlayer struct {
   spamChan          chan struct{}
-  id                uuid.UUID
   active            bool
   lastSync          int64
 
@@ -61,12 +60,12 @@ type UDPPlayer struct {
   toSim             chan UDPMsg
   toClient          chan UDPMsg
   state             UDPPlayerState
-  stats             *player.PlayerStats
+  info              *player.Player
 }
 
-func NewUdpPlayer(id uuid.UUID) *UDPPlayer {
+func NewUdpPlayer(playerInfo *player.Player) *UDPPlayer {
   var p UDPPlayer
-  p.id = id
+  p.info = playerInfo
   p.active = false
   p.state = DISCONNECTED
   p.lastSync = 0
@@ -196,7 +195,7 @@ func (p *UDPPlayer) unpack(packet []byte) {
       p.rxSeq = seq
 
       for head < msgLen {
-        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.toSim, p.id)
+        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.toSim, p.info.Id)
       }
     }
   }
@@ -254,7 +253,7 @@ func (p *UDPPlayer) PackAndSend() {
     msgSize := msg.GetSize()
     if p.packetBufferTail + msgSize >= int(BUFFER_SIZE) {
       p.toClient <- msg
-      log.Printf("%v packetBuffer overflow.", p.id)
+      log.Printf("%v packetBuffer overflow.", p.info.Id)
     }
 
     if !p.packetBufferEmpty {
@@ -321,7 +320,7 @@ func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
       challengeResponse := snet.Read_int64(bytes[5:13])
       if challengeResponse == p.clientSalt ^ p.serverSalt {
         p.state = CONNECTED
-        log.Printf("%v is welcome.", p.id)
+        log.Printf("%v is welcome.", p.info.Id)
         msgBytes := make([]byte, 13)
         binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
         msgBytes[4] = byte(WELCOME)
@@ -329,7 +328,7 @@ func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
         p.sendRepeating(msgBytes, 500, 20)
         p.state = SPECTATING
       } else {
-        log.Printf("%v failed challenge with %d", p.id, p.clientSalt ^ p.serverSalt)
+        log.Printf("%v failed challenge with %d", p.info.Id, p.clientSalt ^ p.serverSalt)
       }
     }
 
@@ -345,7 +344,7 @@ func (p *UDPPlayer) AddMsg(m UDPMsg) {
   select {
   case p.toClient <- m:
   default:
-    log.Printf("%v msg queue full. Discarding...", p.id)
+    log.Printf("%v msg queue full. Discarding...", p.info.Id)
   }
 }
 
@@ -358,7 +357,7 @@ func (p *UDPPlayer) SetMsgFactory(factory UDPMsgFactory) {
 }
 
 func (p *UDPPlayer) GetPlayerId() uuid.UUID {
-  return p.id
+  return p.info.Id
 }
 
 func (p *UDPPlayer) Activate() {
@@ -377,12 +376,8 @@ func (p *UDPPlayer) SetState(s UDPPlayerState) {
   p.state = s
 }
 
-func (p *UDPPlayer) SetStats(s *player.PlayerStats) {
-  p.stats = s
-}
-
-func (p *UDPPlayer) GetStats() *player.PlayerStats {
-  return p.stats
+func (p *UDPPlayer) GetStats() player.PlayerStats {
+  return p.info.Stats
 }
 
 func (p *UDPPlayer) GetState() UDPPlayerState {

@@ -304,7 +304,10 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
                     ip := net.IP(ipBytes)
                     reader.Discard(int(ipLen[0]))
 
-                    plr := ps.players.Add(playerId, player.NewPlayerStats())
+                    var info player.Player
+                    info.Id = playerId
+                    info.Stats = player.DefaultPlayerStats()
+                    plr := ps.players.Add(&info)
                     if plr != nil {
                       plr.SetSimChan(ps.simulation.GetPlayerChan())
                       plr.SetMsgFactory(&ps.msgFactory)

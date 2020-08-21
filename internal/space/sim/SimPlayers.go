@@ -15,11 +15,10 @@ type SimPlayers struct {
   playerMap sync.Map
 }
 
-func (p *SimPlayers) Add(id uuid.UUID, stats *player.PlayerStats) *udp.UDPPlayer {
-  plr := udp.NewUdpPlayer(id)
-  plr.SetStats(stats)
+func (p *SimPlayers) Add(info *player.Player) *udp.UDPPlayer {
+  plr := udp.NewUdpPlayer(info)
 
-  _, exists := p.playerMap.LoadOrStore(id, plr)
+  _, exists := p.playerMap.LoadOrStore(info.Id, plr)
   if !exists {
     p.Count += 1
   }

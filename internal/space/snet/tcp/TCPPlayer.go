@@ -6,6 +6,8 @@ import (
   "encoding/binary"
   "github.com/google/uuid"
   "github.com/panjf2000/gnet"
+
+  "go-space-serv/internal/space/player"
 )
 
 type TCPPlayerState byte
@@ -19,23 +21,22 @@ const (
 const packetSize int = 1024
 
 type TCPPlayer struct {
-  playerId        uuid.UUID
   connection      gnet.Conn
   factory         TCPMsgFactory
   state           TCPPlayerState
   toClient chan   TCPMsg
   toWorld  chan   TCPMsg
+
+  info            *player.Player
 }
 
-func NewTCPPlayer(conn gnet.Conn) *TCPPlayer {
+func NewTCPPlayer(conn gnet.Conn, info *player.Player) *TCPPlayer {
   var p TCPPlayer
   p.toClient = make(chan TCPMsg, 100)
   p.toWorld = make(chan TCPMsg, 100)
   p.connection = conn
   p.state = DISCONNECTED
-
-  p.playerId = uuid.New()
-  log.Printf("generated playerId: %v", p.playerId)
+  p.info = info
 
   return &p
 }
@@ -94,7 +95,7 @@ func (p *TCPPlayer) Push(m TCPMsg) {
   select {
   case p.toClient <- m:
   default:
-    log.Printf("%v msg chan full. Discarding...", p.playerId)
+    log.Printf("%v msg chan full. Discarding...", p.info.Id)
   }
 }
 
@@ -107,7 +108,7 @@ func (p *TCPPlayer) SetMsgFactory(f TCPMsgFactory) {
 }
 
 func (p *TCPPlayer) GetPlayerId() uuid.UUID {
-  return p.playerId
+  return p.info.Id
 }
 
 func (p *TCPPlayer) GetState() TCPPlayerState {

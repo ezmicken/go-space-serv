@@ -18,21 +18,26 @@ type WorldPlayers struct {
 }
 
 func (p *WorldPlayers) Add(c gnet.Conn) (plr *tcp.TCPPlayer, id uuid.UUID) {
-  plr = tcp.NewTCPPlayer(c)
-  id = plr.GetPlayerId()
+  var stats player.PlayerStats
+  stats.Thrust = 12
+  stats.MaxSpeed = 20
+  stats.Rotation = 210
 
-  _, exists := p.playerMap.LoadOrStore(id, plr)
+  var playerInfo player.Player
+  playerInfo.Stats = stats
+  playerInfo.BodyId = 0
+  playerInfo.Id = uuid.New()
+
+  plr = tcp.NewTCPPlayer(c, &playerInfo)
+  id = playerInfo.Id
+
+  _, exists := p.playerMap.LoadOrStore(playerInfo.Id, plr)
   if !exists {
     p.Count += 1
 
-    var stats player.PlayerStats
-    stats.Thrust = 12
-    stats.MaxSpeed = 20
-    stats.Rotation = 210
-
     var joinMsg msg.PlayerJoinMsg
-    joinMsg.Id = id
-    joinMsg.Stats = stats
+    joinMsg.Id = playerInfo.Id
+    joinMsg.Stats = playerInfo.Stats
 
     p.playerMap.Range(func(key, value interface{}) bool {
       otherPlr := value.(*tcp.TCPPlayer)
@@ -42,7 +47,7 @@ func (p *WorldPlayers) Add(c gnet.Conn) (plr *tcp.TCPPlayer, id uuid.UUID) {
         } else {
           var existMsg msg.PlayerJoinMsg
           existMsg.Id = otherPlr.GetPlayerId()
-          existMsg.Stats = stats
+          existMsg.Stats = playerInfo.Stats
           plr.Push(&existMsg)
         }
       }
