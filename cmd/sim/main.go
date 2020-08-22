@@ -320,14 +320,6 @@ func (ps *physicsServer) ipIsValid(ip string) bool {
 // Event Handler
 
 func (ps *physicsServer) OnShutdown(srv gnet.Server) {
-  if ps.worldConnOpen == true {
-    log.Printf("IShutdown -> world")
-    // TODO: do this from world() when we actually
-    // write something other than this so we can flush.
-    ps.worldConn.Write([]byte{1, 0, 0, 0, byte(snet.IShutdown)})
-    ps.worldConn.Close()
-  }
-
   ps.state = snet.DEAD
   close(ps.shutdown)
 }

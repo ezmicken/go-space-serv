@@ -5,9 +5,6 @@ import (
   "sync"
   "time"
   "net"
-  "context"
-  "os"
-  "os/signal"
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
@@ -38,11 +35,8 @@ type worldServer struct {
   addrToId          sync.Map
 
   // lifecycle
-  ctx               context.Context
-  lifeWG            sync.WaitGroup
   life        chan  struct{}
-  cancel            func()
-  physicsOpen       bool
+  shutdown    chan  struct{}
 }
 
 const maxMsgSize int = 1024
@@ -72,47 +66,28 @@ func main() {
     state: snet.WAIT_PHYS,
     worldMap: &wm,
     players: &plrs,
-    physicsOpen: false,
   }
 
-  ws.ctx, ws.cancel = context.WithCancel(context.Background())
   ws.life = make(chan struct{})
-  go ws.sig()
-  go ws.live()
+  ws.shutdown = make(chan struct{})
 
-  <-ws.ctx.Done()
-  log.Printf("Shutting down...")
-  ws.state = snet.SHUTDOWN
+  go ws.live()
   <-ws.life
 
   log.Printf("end")
 }
 
 func (ws *worldServer) live() {
-  ws.lifeWG.Add(1)
+  defer close(ws.life)
+
   go func() {
     err := gnet.Serve(ws, "tcp://:9494", gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
     if err != nil {
-      ws.lifeWG.Done()
-      ws.cancel()
       log.Fatal(err)
     }
-    log.Printf("server finish")
   }()
 
-  ws.lifeWG.Wait()
-  ws.state = snet.DEAD
-  ws.cancel()
-  close(ws.life)
-}
-
-func (ws *worldServer) sig() {
-  signalChan := make(chan os.Signal, 1)
-  signal.Notify(signalChan, os.Interrupt)
-
-  oscall := <-signalChan
-  log.Printf("system call: %+v", oscall)
-  ws.cancel()
+  <-ws.shutdown
 }
 
 func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
@@ -174,7 +149,6 @@ func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
 
 func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
   ws.physics = c
-  ws.physicsOpen = true
   ws.physicsIP = snet.GetOutboundIP()
   ws.state = snet.SETUP
   log.Printf("Physics server connected, sending blocks.")
@@ -221,8 +195,6 @@ func (ws *worldServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 
   if !isPhysicsConnection(c) {
     ws.closePlayerConnection(c);
-  } else {
-    ws.physicsOpen = false
   }
 
   return
@@ -264,11 +236,16 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
 }
 
 func (ws *worldServer) OnShutdown(s gnet.Server) {
-  ws.lifeWG.Done()
+  ws.state = snet.DEAD
+  close(ws.shutdown)
 }
 
 func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
   delay = ws.tick
+
+  if ws.state == snet.SHUTDOWN {
+    action = gnet.Shutdown
+  }
 
   // if ws.state == snet.ALIVE {
   //   ws.players.Range(func(key, value interface{}) bool {
