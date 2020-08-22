@@ -4,6 +4,7 @@ import (
   "log"
   "sync"
   "time"
+  "encoding/binary"
 
   "github.com/go-gl/mathgl/mgl32"
   "github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/sim/msg"
   "go-space-serv/internal/space/snet/udp"
+  "go-space-serv/internal/space/snet"
 )
 
 type Simulation struct {
@@ -27,14 +29,14 @@ type Simulation struct {
   framesSinceLastSync int64       // simulation frames since last sync
 
   fromPlayers chan    udp.UDPMsg  // incoming msgs from clients (UdpPlayer)
-  toWorld chan        byte
+  toWorld     chan    []byte
   ticker              *time.Ticker
 }
 
-func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers) {
+func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers, worldChan chan []byte) {
   s.players = players
+  s.toWorld = worldChan
   s.fromPlayers = make(chan udp.UDPMsg, 100)
-  s.toWorld = make(chan byte, 1024)
   s.worldMap = worldMap
   s.seq = 0
   s.lastSync = 0
@@ -92,6 +94,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
             ht.VelocityDelta = mgl32.Vec3{0, 0, 0}
             pBod.Initialize(ht)
             s.addControlledBody(playerId, pBod)
+            player.SetState(udp.PLAYING)
 
             log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
 
@@ -104,7 +107,31 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
             s.players.PushAll(&response)
 
             // tell the map server
+            worldSpawnMsg := []byte{byte(snet.ISpawn), 0, 0}
+            binary.LittleEndian.PutUint16(worldSpawnMsg[1:3], pBod.GetBody().Id)
 
+            worldSpawnMsg = append(worldSpawnMsg,  playerId[0:]...)
+            s.toWorld <- worldSpawnMsg
+          case udp.EXIT:
+            player := s.players.GetPlayer(playerId)
+            if player != nil && player.GetState() == udp.PLAYING {
+              cb, ok := s.controlledBodies.Load(playerId)
+              if ok && cb != nil {
+                bodyId := cb.(*ControlledBody).GetBody().Id
+                s.RemoveControlledBody(playerId)
+                player.SetState(udp.SPECTATING)
+
+                // tell other playesr
+                var response msg.ExitMsg
+                response.BodyId = bodyId
+                s.players.PushAll(&response)
+
+                // tell the map server
+                worldSpecMsg := []byte{byte(snet.ISpec), 0, 0}
+                binary.LittleEndian.PutUint16(worldSpecMsg[1:3], bodyId)
+                s.toWorld <- worldSpecMsg
+              }
+            }
         }
       case *msg.MoveShootMsg:
         m := t
@@ -124,11 +151,40 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
     }
   }
 
+  notifyWorld := seq % helpers.GetConfiguredWorldRate() == 0
+  x := float32(-1)
+  y := float32(-1)
+
+
+  worldMsg := []byte{}
+  head := 0
+
+  if notifyWorld == true {
+    worldMsg = append(worldMsg, byte(snet.IState))
+  }
+
   // Advance the simulation by one step for each controlled body
   s.controlledBodies.Range(func(key, value interface{}) bool {
-    value.(*ControlledBody).ProcessFrame(frameStart, seq)
+    cb := value.(*ControlledBody)
+    x, y = cb.ProcessFrame(frameStart, seq)
+    if notifyWorld && x != -1 && y != -1 {
+      gridX, gridY := s.worldMap.GetCellFromPosition(x, y)
+      bod := cb.GetBody()
+      worldMsg = append(worldMsg, []byte{0, 0, 0, 0, 0, 0}...)
+      binary.LittleEndian.PutUint16(worldMsg[head:head+2], bod.Id)
+      head += 2
+      binary.LittleEndian.PutUint16(worldMsg[head:head+2], uint16(gridX))
+      head += 2
+      binary.LittleEndian.PutUint16(worldMsg[head:head+2], uint16(gridY))
+      head+= 2
+    }
+
     return true
   })
+
+  if notifyWorld && len(worldMsg) > 0 {
+    s.toWorld <- worldMsg
+  }
 
   // Update all bodies
   // flag dead bodies for removal
@@ -180,6 +236,7 @@ func (s *Simulation) loop() {
     } else if shouldSync {
       shouldSync = false
     }
+
     framesToProcess = 0
   }
 }

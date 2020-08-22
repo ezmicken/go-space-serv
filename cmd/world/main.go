@@ -32,6 +32,7 @@ type worldServer struct {
 
   worldMap          *world.WorldMap
   players           *world.WorldPlayers
+  bodyToPlayer      map[uint16]uuid.UUID
   addrToId          sync.Map
 
   // lifecycle
@@ -66,6 +67,7 @@ func main() {
     state: snet.WAIT_PHYS,
     worldMap: &wm,
     players: &plrs,
+    bodyToPlayer: make(map[uint16]uuid.UUID),
   }
 
   ws.life = make(chan struct{})
@@ -209,7 +211,19 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
         ws.physicsPort = snet.Read_uint32(bytes[1:])
         log.Printf("Accepting player connections...")
         ws.state = snet.ALIVE
-      } else {
+      } else if ws.state >= snet.ALIVE {
+        if bytes[0] == byte(snet.ISpawn) {
+          bodyId := snet.Read_uint16(bytes[1:3])
+          playerId, err := uuid.FromBytes(bytes[3:19])
+          if err == nil {
+            ws.bodyToPlayer[bodyId] = playerId
+            log.Printf("%v spawned", playerId)
+          }
+        } else if bytes[0] == byte(snet.ISpec) {
+          bodyId := snet.Read_uint16(bytes[1:3])
+          log.Printf("%v specced", ws.bodyToPlayer[bodyId])
+          delete(ws.bodyToPlayer, bodyId)
+        }
         // _ = ws.pool.Submit(func() {
         //   if len(data) >= 4 {
         //     msg := snet.GetNetworkMsgFromData(data)

@@ -136,7 +136,8 @@ func (ps *physicsServer) live() {
   ps.state = snet.WAIT_WORLD
 
   go ps.serve("udp://:9495")
-  go ps.world(ps.worldLaddr, ps.worldRaddr)
+  go ps.worldRx(ps.worldLaddr, ps.worldRaddr)
+  go ps.worldTx()
 
   <-ps.shutdown
 }
@@ -149,8 +150,14 @@ func (ps *physicsServer) serve(udpAddr string) {
   }
 }
 
+func (ps *physicsServer) worldTx() {
+  for packet := range ps.toWorld {
+    ps.worldConn.Write(packet)
+  }
+}
+
 // world server <-> physics server interaction
-func (ps *physicsServer) world(laddr, raddr *net.TCPAddr) {
+func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
   c, err := net.DialTCP("tcp", laddr, raddr)
   if err != nil {
     log.Printf("%s", err)
@@ -321,6 +328,8 @@ func (ps *physicsServer) ipIsValid(ip string) bool {
 
 func (ps *physicsServer) OnShutdown(srv gnet.Server) {
   ps.state = snet.DEAD
+  ps.worldConn.Close()
+  close(ps.toWorld)
   close(ps.shutdown)
 }
 

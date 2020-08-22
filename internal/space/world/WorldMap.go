@@ -1,6 +1,7 @@
 package world
 
 import (
+  "math"
   "encoding/binary"
 
   "github.com/ojrac/opensimplex-go"
@@ -50,24 +51,15 @@ func (wm *WorldMap) GetBlock(x, y int) BlockType {
   return wm.blocks[x][y]
 }
 
-func (wm *WorldMap) GetBlocksAroundPoint(x, y int) (out []Block) {
-  out = []Block{}
-  for xI := x - viewSize; xI < x + viewSize; xI++ {
-    for yI := y - viewSize; yI < y + viewSize; yI++ {
-      var b Block;
-      b.Type = wm.blocks[yI][xI]
-      b.X = xI
-      b.Y = yI
-      out = append(out, b)
-    }
-  }
-
-  return
-}
-
 func (wm *WorldMap) GetCellCenter(x, y int) (xPos, yPos float32) {
   xPos = float32(wm.Resolution * x + (wm.Resolution / 2))
   yPos = float32(wm.Resolution * y + (wm.Resolution / 2))
+  return
+}
+
+func (wm *WorldMap) GetCellFromPosition(xPos, yPos float32) (x, y int) {
+  x = int(math.Floor(float64(xPos / float32(wm.Resolution))))
+  y = int(math.Floor(float64(yPos / float32(wm.Resolution))))
   return
 }
 

@@ -88,7 +88,7 @@ func (cb *ControlledBody) InputToState(seq int, moveshoot byte) {
   cb.stateBuffer.Clean()
 }
 
-func (cb *ControlledBody) ProcessFrame(frameStart int64, seq int) {
+func (cb *ControlledBody) ProcessFrame(frameStart int64, seq int) (x, y float32) {
   cb.bod.Position = cb.bod.TargetPosition
   cb.bod.Angle = cb.bod.TargetAngle
 
@@ -102,7 +102,14 @@ func (cb *ControlledBody) ProcessFrame(frameStart int64, seq int) {
     cb.bod.TargetPosition = ht.Position
     cb.bod.TargetAngle = ht.Angle
     cb.bod.Velocity = ht.Velocity
+    x = ht.Position.X()
+    y = ht.Position.Y()
+  } else {
+    x = -1
+    y = -1
   }
+
+  return
 }
 
 func (cb *ControlledBody) GetBody() *udp.UDPBody {
