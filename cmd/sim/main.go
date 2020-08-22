@@ -8,9 +8,8 @@ import (
   "bufio"
   "math/rand"
   "sync"
-  "context"
   "os"
-  "os/signal"
+  //"os/signal"
   "encoding/binary"
   "runtime/pprof"
 
@@ -45,11 +44,9 @@ type physicsServer struct {
   *gnet.EventServer
 
   // Lifecycle
-  ctx                 context.Context
-  lifeWG              sync.WaitGroup
   life          chan  struct{}
+  shutdown      chan  struct{}
   state               snet.ServerState
-  cancel              func()
 
   players             sim.SimPlayers
   simulation          sim.Simulation
@@ -68,6 +65,7 @@ type physicsServer struct {
   worldMap            world.WorldMap
   worldMapBytes       []byte
   worldMapLen         int
+  toWorld       chan  []byte
 }
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
@@ -98,6 +96,7 @@ func main() {
   config.VERSION = "0.0.1"
   config.PROTOCOL_ID = SDBMHash(config.NAME + config.VERSION)
   config.MAX_MSG_SIZE = 1024
+  config.WORLD_RATE = 8
   helpers.SetConfig(&config)
 
   log.Printf("PROTOCOL_ID: %d", config.PROTOCOL_ID)
@@ -109,6 +108,7 @@ func main() {
     launchTime: time.Now().UnixNano(),
     state: snet.DEAD,
     worldConnOpen: false,
+    toWorld: make(chan []byte, 32),
   }
 
   ps.worldLaddr = &net.TCPAddr{
@@ -122,51 +122,27 @@ func main() {
 
   rand.Seed(time.Now().UnixNano())
 
-  // Start listening for operating system signals
-  ps.ctx, ps.cancel = context.WithCancel(context.Background())
   ps.life = make(chan struct{})
-  go ps.sig()
-  go ps.live()
+  ps.shutdown = make(chan struct{})
 
-  // Wait for context to finish
-  <-ps.ctx.Done()
-  log.Printf("Shuttind down...");
-  ps.state = snet.SHUTDOWN
+  go ps.live()
   <-ps.life
 
   log.Printf("end")
 }
 
 func (ps *physicsServer) live() {
-  var waitWorld sync.WaitGroup
+  defer close(ps.life)
+
   ps.state = snet.WAIT_WORLD
 
-  waitWorld.Add(1)
-  go ps.world(&waitWorld, ps.worldLaddr, ps.worldRaddr)
-  waitWorld.Wait()
-
   go ps.serve("udp://:9495")
+  go ps.world(ps.worldLaddr, ps.worldRaddr)
 
-  ps.state = snet.ALIVE
-  ps.lifeWG.Wait()
-
-  close(ps.life)
-}
-
-func (ps *physicsServer) sig() {
-  signalChan := make(chan os.Signal, 1)
-  signal.Notify(signalChan, os.Interrupt)
-
-  oscall := <-signalChan
-  log.Printf("system call: %+v", oscall)
-
-  ps.cancel()
+  <-ps.shutdown
 }
 
 func (ps *physicsServer) serve(udpAddr string) {
-  ps.lifeWG.Add(1)
-  defer ps.lifeWG.Done()
-
   log.Printf("Listening to %s", udpAddr)
   err := gnet.Serve(ps, udpAddr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
   if err != nil {
@@ -175,10 +151,7 @@ func (ps *physicsServer) serve(udpAddr string) {
 }
 
 // world server <-> physics server interaction
-func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
-  ps.lifeWG.Add(1)
-  defer ps.lifeWG.Done()
-
+func (ps *physicsServer) world(laddr, raddr *net.TCPAddr) {
   c, err := net.DialTCP("tcp", laddr, raddr)
   if err != nil {
     log.Printf("%s", err)
@@ -211,8 +184,8 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
 
   for ps.state <= snet.ALIVE {
     select {
-    case <-ps.ctx.Done():
-      log.Printf("Closing world connection...")
+    case <-ps.shutdown:
+      log.Printf("end world")
       return
     case <- ticker.C:
       switch state {
@@ -232,8 +205,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             state = readingResolution
             log.Printf("Read worldMap size=%d", size)
           } else {
-            wg.Done()
-            ps.cancel()
+            ps.state = snet.SHUTDOWN
             log.Printf(err.Error())
           }
         case readingResolution:
@@ -247,8 +219,7 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             state = readingMap
             log.Printf("Read worldMap resolution=%d", ps.worldMap.Resolution)
           } else {
-            wg.Done()
-            ps.cancel()
+            ps.state = snet.SHUTDOWN
             log.Printf(err.Error())
           }
         case readingMap:
@@ -273,14 +244,13 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
             c.Write(portMsg)
 
             // Start the simulation
-            ps.simulation.Start(&ps.worldMap, &ps.players);
+            ps.simulation.Start(&ps.worldMap, &ps.players, ps.toWorld);
 
-            // Finish waiting so main can start listening for connections.
-            wg.Done()
+            // Signal that world is setup.
+            ps.state = snet.ALIVE
           } else {
             log.Printf("%s", err.Error())
-            wg.Done()
-            ps.cancel()
+            ps.state = snet.SHUTDOWN
           }
         case readingEvent:
           event, err := reader.Peek(1)
@@ -327,12 +297,12 @@ func (ps *physicsServer) world(wg *sync.WaitGroup, laddr, raddr *net.TCPAddr) {
                 ps.simulation.RemoveControlledBody(playerId)
               }
             } else if event[0] == byte(snet.IShutdown) {
-              ps.cancel()
+              ps.state = snet.SHUTDOWN
             }
           }
 
           if err != nil && err.Error() == "EOF" {
-            ps.cancel() // TODO: retry connecting to world
+            ps.state = snet.SHUTDOWN // TODO: retry connecting to world
             return
           } else if err != nil && ps.state == snet.SHUTDOWN {
             return
@@ -369,6 +339,7 @@ func (ps *physicsServer) OnShutdown(srv gnet.Server) {
   }
 
   ps.state = snet.DEAD
+  close(ps.shutdown)
 }
 
 func (ps *physicsServer) Tick() (delay time.Duration, action gnet.Action) {
