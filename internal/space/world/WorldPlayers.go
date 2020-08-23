@@ -25,7 +25,6 @@ func (p *WorldPlayers) Add(c gnet.Conn) (plr *tcp.TCPPlayer, id uuid.UUID) {
 
   var playerInfo player.Player
   playerInfo.Stats = stats
-  playerInfo.BodyId = 0
   playerInfo.Id = uuid.New()
 
   plr = tcp.NewTCPPlayer(c, &playerInfo)

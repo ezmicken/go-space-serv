@@ -5,6 +5,7 @@ import (
   "encoding/binary"
 
   "github.com/ojrac/opensimplex-go"
+  "githu.com/akavel/polyclip-go"
 
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world/msg"
@@ -18,6 +19,7 @@ type WorldMap struct {
   ChunkSize int
   SpawnX int
   SpawnY int
+  Poly polcyclip.Polygon
 
   blocks [][]BlockType
 }
@@ -25,6 +27,7 @@ type WorldMap struct {
 var viewSize int = 16
 
 func (wm *WorldMap) Generate() {
+  Poly = polyclip.Polygon{{ {0, 0}, {wm.W, 0}, {wm.W, wm.H}, {0, wm.H} }}
   noise := opensimplex.New(wm.Seed)
 
   // initialize multidimensional array
