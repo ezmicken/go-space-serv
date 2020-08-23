@@ -206,46 +206,50 @@ func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.
   bytes := append([]byte{}, data...)
   c.ResetBuffer()
   if isPhysicsConnection(c) {
-    _ = ws.pool.Submit(func() {
-      if ws.state == snet.SETUP && len(bytes) >= 5 && bytes[0] == byte(snet.IReady) {
-        ws.physicsPort = snet.Read_uint32(bytes[1:])
-        log.Printf("Accepting player connections...")
-        ws.state = snet.ALIVE
-      } else if ws.state >= snet.ALIVE {
-        if bytes[0] == byte(snet.ISpawn) {
-          bodyId := snet.Read_uint16(bytes[1:3])
-          playerId, err := uuid.FromBytes(bytes[3:19])
-          if err == nil {
-            ws.bodyToPlayer[bodyId] = playerId
-            log.Printf("%v spawned", playerId)
-          }
-        } else if bytes[0] == byte(snet.ISpec) {
-          bodyId := snet.Read_uint16(bytes[1:3])
-          log.Printf("%v specced", ws.bodyToPlayer[bodyId])
-          delete(ws.bodyToPlayer, bodyId)
-        }
-        // _ = ws.pool.Submit(func() {
-        //   if len(data) >= 4 {
-        //     msg := snet.GetNetworkMsgFromData(data)
-        //     if msg != nil {
-        //       responseMsg := interpret(*msg, c)
-        //       c.ResetBuffer();
-
-        //       if responseMsg != nil {
-        //         response := snet.GetDataFromNetworkMsg(responseMsg)
-        //         if response != nil {
-        //           log.Printf("[%s] React <- %d", c.RemoteAddr().String(), responseMsg.Size)
-        //           c.AsyncWrite(responseMsg.SizeBytes())
-        //           c.AsyncWrite(responseMsg.Data)
-        //         }
-        //       }
-        //     }
-        //   }
-        // })
-      }
-    })
+    _ = ws.pool.Submit(func(){ws.interpretPhysics(bytes)})
   }
 
+  return
+}
+
+func (ws *worldServer) interpretPhysics(bytes []byte) {
+  if ws.state == snet.SETUP && len(bytes) >= 5 && bytes[0] == byte(snet.IReady) {
+    ws.physicsPort = snet.Read_uint32(bytes[1:])
+    log.Printf("Accepting player connections...")
+    ws.state = snet.ALIVE
+  } else if ws.state >= snet.ALIVE {
+    if bytes[0] == byte(snet.ISpawn) {
+      bodyId := snet.Read_uint16(bytes[1:3])
+      playerId, err := uuid.FromBytes(bytes[3:19])
+      if err == nil {
+        ws.bodyToPlayer[bodyId] = playerId
+        log.Printf("%v spawned", playerId, )
+      }
+    } else if bytes[0] == byte(snet.ISpec) {
+      bodyId := snet.Read_uint16(bytes[1:3])
+      log.Printf("%v specced", ws.bodyToPlayer[bodyId])
+      delete(ws.bodyToPlayer, bodyId)
+    } else if bytes[0] == byte(snet.IState) {
+      head := 1
+      l := len(bytes)
+      for head < l {
+        bodyId, x, y := ws.deserializeState(bytes[head:head+6])
+        head += 6
+
+        plr := ws.players.GetPlayer(ws.bodyToPlayer[bodyId])
+        if plr != nil {
+          // TODO: update position and do polygon boolean stuff
+          //plr.Update(x, y, ws.worldMap.Poly)
+        }
+      }
+    }
+  }
+}
+
+func (ws *worldServer) deserializeState(bytes []byte) (id, x, y uint16) {
+  id = snet.Read_uint16(bytes[:2])
+  x = snet.Read_uint16(bytes[2:4])
+  y = snet.Read_uint16(bytes[4:6])
   return
 }
 

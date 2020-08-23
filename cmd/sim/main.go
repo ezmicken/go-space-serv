@@ -95,7 +95,7 @@ func main() {
   config.VERSION = "0.0.1"
   config.PROTOCOL_ID = SDBMHash(config.NAME + config.VERSION)
   config.MAX_MSG_SIZE = 1024
-  config.WORLD_RATE = 8
+  config.WORLD_RATE = 12
   helpers.SetConfig(&config)
 
   log.Printf("PROTOCOL_ID: %d", config.PROTOCOL_ID)

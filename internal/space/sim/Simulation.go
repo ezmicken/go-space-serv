@@ -157,7 +157,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
 
 
   worldMsg := []byte{}
-  head := 0
+  head := 1
 
   if notifyWorld == true {
     worldMsg = append(worldMsg, byte(snet.IState))
@@ -182,7 +182,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
     return true
   })
 
-  if notifyWorld && len(worldMsg) > 0 {
+  if notifyWorld && len(worldMsg) > 1 {
     s.toWorld <- worldMsg
   }
 
