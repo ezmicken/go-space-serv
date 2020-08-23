@@ -7,14 +7,18 @@ import(
   "log"
   "strings"
   "net"
+  "sync"
 )
 
 const PrefixLength int = 4
 
 // auto-incrementing id
 var nextId uint16 = 0
+var idLock sync.Mutex
 func GetNextId() uint16 {
+  idLock.Lock()
   nextId += 1
+  idLock.Unlock()
   return nextId
 }
 
