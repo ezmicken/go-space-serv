@@ -6,8 +6,6 @@ import (
   "encoding/binary"
   "github.com/google/uuid"
   "github.com/panjf2000/gnet"
-
-  "go-space-serv/internal/space/player"
 )
 
 type TCPPlayerState byte
@@ -21,22 +19,21 @@ const (
 const packetSize int = 1024
 
 type TCPPlayer struct {
+  Id              uuid.UUID
+  Outgoing  chan  TCPMsg
+
+  incoming  chan  TCPMsg
   connection      gnet.Conn
   factory         TCPMsgFactory
   state           TCPPlayerState
-  toClient chan   TCPMsg
-  toWorld  chan   TCPMsg
-
-  info            *player.Player
 }
 
-func NewTCPPlayer(conn gnet.Conn, info *player.Player) *TCPPlayer {
+func NewPlayer(conn gnet.Conn, id uuid.UUID, factory TCPMsgFactory) *TCPPlayer {
   var p TCPPlayer
-  p.toClient = make(chan TCPMsg, 100)
-  p.toWorld = make(chan TCPMsg, 100)
+  p.Outgoing = make(chan TCPMsg, 100)
+  p.incoming = make(chan TCPMsg, 100)
   p.connection = conn
   p.state = DISCONNECTED
-  p.info = info
 
   return &p
 }
@@ -61,7 +58,7 @@ func (p *TCPPlayer) Tx() {
       var m TCPMsg
       fin := false
       select {
-      case m = <- p.toClient:
+      case m = <- p.Outgoing:
         head = m.Serialize(packet, head)
         if head >= packetSize {
           log.Printf("packet is max size")
@@ -87,29 +84,7 @@ func (p *TCPPlayer) Tx() {
   }
 }
 
-func (p *TCPPlayer) Rx() {
-
-}
-
-func (p *TCPPlayer) Push(m TCPMsg) {
-  select {
-  case p.toClient <- m:
-  default:
-    log.Printf("%v msg chan full. Discarding...", p.info.Id)
-  }
-}
-
-func (p *TCPPlayer) SetWorldChan(c chan TCPMsg) {
-  p.toWorld = c
-}
-
-func (p *TCPPlayer) SetMsgFactory(f TCPMsgFactory) {
-  p.factory = f
-}
-
-func (p *TCPPlayer) GetPlayerId() uuid.UUID {
-  return p.info.Id
-}
+func (p *TCPPlayer) Rx() {}
 
 func (p *TCPPlayer) GetState() TCPPlayerState {
   return p.state

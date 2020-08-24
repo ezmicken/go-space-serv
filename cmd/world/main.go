@@ -13,10 +13,10 @@ import (
   // integer math
   //"github.com/bxcodec/saint"
 
-  "go-space-serv/internal/space/player"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/world/msg"
   "go-space-serv/internal/space/snet"
+  "go-space-serv/internal/space/snet/tcp"
 )
 
 type worldServer struct {
@@ -32,6 +32,7 @@ type worldServer struct {
 
   worldMap          *world.WorldMap
   players           *world.WorldPlayers
+  msgFactory        world.WorldMsgFactory
   bodyToPlayer      map[uint16]uuid.UUID
   addrToId          sync.Map
 
@@ -95,44 +96,43 @@ func (ws *worldServer) live() {
 func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   // TODO: auth
   // TODO: get this from db via auth token
-  var stats player.PlayerStats
-  stats.Thrust = 12
-  stats.MaxSpeed = 20
-  stats.Rotation = 172
-  plr, playerId := ws.players.Add(c)
+  id := uuid.New()
+  tcpPlr := tcp.NewPlayer(c, id, &ws.msgFactory)
+  plr := ws.players.Add(tcpPlr)
 
   addr := c.RemoteAddr().(*net.TCPAddr).IP
-  ws.addrToId.Store(addr.String(), playerId)
+  ws.addrToId.Store(addr.String(), id)
 
   // Tell this client his stats
   var playerInfoMsg msg.PlayerInfoMsg
-  playerInfoMsg.Id = playerId
-  playerInfoMsg.Stats = stats
-  plr.Push(&playerInfoMsg)
+  playerInfoMsg.Id = id
+  playerInfoMsg.Stats = plr.Stats
+  plr.Tcp.Outgoing <- &playerInfoMsg
 
   // Tell this client about the world
   var worldInfoMsg msg.WorldInfoMsg
   worldInfoMsg.Size = uint32(ws.worldMap.W)
   worldInfoMsg.Res = byte(ws.worldMap.Resolution)
-  plr.Push(&worldInfoMsg)
+  plr.Tcp.Outgoing <- &worldInfoMsg
 
   // Tell this client about the physics server
   var simInfoMsg msg.SimInfoMsg
   simInfoMsg.Ip = ws.physicsIP
   simInfoMsg.Port = ws.physicsPort
-  plr.Push(&simInfoMsg)
+  plr.Tcp.Outgoing <- &simInfoMsg
 
   // Tell the physics server about this client
   packet := []byte{byte(snet.IJoin)}
-  packet = append(packet, playerId[0:]...)
+  packet = append(packet, id[0:]...)
   packet = append(packet, byte(len(addr)))
   packet = append(packet, addr...)
   ws.physics.AsyncWrite(packet)
 
-  plr.Connected()
+  plr.Tcp.Connected()
 
+  // TODO: remove this and let world send view's worth of chunk
   blocksMsg := ws.worldMap.SerializeChunk(100)
-  plr.Push(&blocksMsg)
+  plr.Tcp.Outgoing <- &blocksMsg
 
   return
 }
@@ -223,7 +223,7 @@ func (ws *worldServer) interpretPhysics(bytes []byte) {
       playerId, err := uuid.FromBytes(bytes[3:19])
       if err == nil {
         ws.bodyToPlayer[bodyId] = playerId
-        log.Printf("%v spawned", playerId, )
+        log.Printf("%v spawned", playerId)
       }
     } else if bytes[0] == byte(snet.ISpec) {
       bodyId := snet.Read_uint16(bytes[1:3])
@@ -233,13 +233,13 @@ func (ws *worldServer) interpretPhysics(bytes []byte) {
       head := 1
       l := len(bytes)
       for head < l {
-        bodyId, _, _ := ws.deserializeState(bytes[head:head+6])
+        bodyId, x, y := ws.deserializeState(bytes[head:head+6])
         head += 6
 
         plr := ws.players.GetPlayer(ws.bodyToPlayer[bodyId])
         if plr != nil {
           // TODO: update position and do polygon boolean stuff
-          //plr.Update(x, y, ws.worldMap.Poly)
+          plr.Update(x, y, ws.worldMap.Poly)
         }
       }
     }

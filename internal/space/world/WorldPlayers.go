@@ -4,7 +4,6 @@ import (
   "sync"
   "log"
 
-  "github.com/panjf2000/gnet"
   "github.com/google/uuid"
 
   "go-space-serv/internal/space/snet/tcp"
@@ -17,44 +16,36 @@ type WorldPlayers struct {
   playerMap sync.Map
 }
 
-func (p *WorldPlayers) Add(c gnet.Conn) (plr *tcp.TCPPlayer, id uuid.UUID) {
-  var stats player.PlayerStats
-  stats.Thrust = 12
-  stats.MaxSpeed = 20
-  stats.Rotation = 210
+func (p *WorldPlayers) Add(tcpPlr *tcp.TCPPlayer) *WorldPlayer{
+  var plr WorldPlayer
+  plr.Tcp = tcpPlr
+  plr.Stats = player.DefaultPlayerStats()
 
-  var playerInfo player.Player
-  playerInfo.Stats = stats
-  playerInfo.Id = uuid.New()
-
-  plr = tcp.NewTCPPlayer(c, &playerInfo)
-  id = playerInfo.Id
-
-  _, exists := p.playerMap.LoadOrStore(playerInfo.Id, plr)
+  _, exists := p.playerMap.LoadOrStore(plr.Tcp.Id, &plr)
   if !exists {
     p.Count += 1
 
     var joinMsg msg.PlayerJoinMsg
-    joinMsg.Id = playerInfo.Id
-    joinMsg.Stats = playerInfo.Stats
+    joinMsg.Id = plr.Tcp.Id
+    joinMsg.Stats = plr.Stats
 
     p.playerMap.Range(func(key, value interface{}) bool {
-      otherPlr := value.(*tcp.TCPPlayer)
-      if otherPlr.GetState() >= tcp.CONNECTED {
-        if otherPlr.GetPlayerId() != id {
-          otherPlr.Push(&joinMsg);
+      otherPlr := value.(*WorldPlayer)
+      if otherPlr.Tcp.GetState() >= tcp.CONNECTED {
+        if otherPlr.Tcp.Id != plr.Tcp.Id {
+          otherPlr.Tcp.Outgoing <- &joinMsg;
         } else {
           var existMsg msg.PlayerJoinMsg
-          existMsg.Id = otherPlr.GetPlayerId()
-          existMsg.Stats = playerInfo.Stats
-          plr.Push(&existMsg)
+          existMsg.Id = otherPlr.Tcp.Id
+          existMsg.Stats = otherPlr.Stats
+          plr.Tcp.Outgoing <- &existMsg
         }
       }
       return true
     })
   }
 
-  return
+  return &plr
 }
 
 func (p *WorldPlayers) Remove(id uuid.UUID) {
@@ -68,10 +59,10 @@ func (p *WorldPlayers) Remove(id uuid.UUID) {
   log.Printf("%s left the world", id)
 }
 
-func (p *WorldPlayers) GetPlayer(id uuid.UUID) *tcp.TCPPlayer {
+func (p *WorldPlayers) GetPlayer(id uuid.UUID) *WorldPlayer {
   plr, ok := p.playerMap.Load(id)
   if ok {
-    return plr.(*tcp.TCPPlayer)
+    return plr.(*WorldPlayer)
   }
 
   return nil
@@ -79,8 +70,8 @@ func (p *WorldPlayers) GetPlayer(id uuid.UUID) *tcp.TCPPlayer {
 
 func (p *WorldPlayers) Push(playerId uuid.UUID, msg tcp.TCPMsg) {
   plr := p.GetPlayer(playerId)
-  if plr != nil && plr.GetState() >= tcp.CONNECTED {
-    plr.Push(msg)
+  if plr != nil && plr.Tcp.GetState() >= tcp.CONNECTED {
+    plr.Tcp.Outgoing <- msg
   } else {
     log.Printf("Tried to push msg to player %s who doesnt exist", playerId)
   }
@@ -88,9 +79,9 @@ func (p *WorldPlayers) Push(playerId uuid.UUID, msg tcp.TCPMsg) {
 
 func (p *WorldPlayers) PushAll(msg tcp.TCPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
-    plr := value.(*tcp.TCPPlayer)
-    if plr.GetState() >= tcp.CONNECTED {
-      plr.Push(msg);
+    plr := value.(*WorldPlayer)
+    if plr.Tcp.GetState() >= tcp.CONNECTED {
+      plr.Tcp.Outgoing <- msg
     }
     return true
   })
@@ -98,9 +89,9 @@ func (p *WorldPlayers) PushAll(msg tcp.TCPMsg) {
 
 func (p *WorldPlayers) PushAllExcluding(playerId uuid.UUID, msg tcp.TCPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
-    plr := value.(*tcp.TCPPlayer)
-    if plr.GetState() >= tcp.CONNECTED && plr.GetPlayerId() != playerId {
-      plr.Push(msg);
+    plr := value.(*WorldPlayer)
+    if plr.Tcp.GetState() >= tcp.CONNECTED && plr.Tcp.Id != playerId {
+      plr.Tcp.Outgoing <- msg
     }
     return true
   })
