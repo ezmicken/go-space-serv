@@ -52,10 +52,6 @@ func (p *WorldPlayers) Remove(id uuid.UUID) {
   p.playerMap.Delete(id)
   p.Count--
 
-  var leaveMsg msg.PlayerLeaveMsg
-  leaveMsg.Id = id
-  p.PushAll(&leaveMsg)
-
   log.Printf("%s left the world", id)
 }
 

@@ -34,6 +34,7 @@ func NewPlayer(conn gnet.Conn, id uuid.UUID, factory TCPMsgFactory) *TCPPlayer {
   p.incoming = make(chan TCPMsg, 100)
   p.connection = conn
   p.state = DISCONNECTED
+  p.Id = id
 
   return &p
 }
