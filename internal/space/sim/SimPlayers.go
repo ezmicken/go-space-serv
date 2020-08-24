@@ -15,15 +15,16 @@ type SimPlayers struct {
   playerMap sync.Map
 }
 
-func (p *SimPlayers) Add(info *player.Player) *udp.UDPPlayer {
-  plr := udp.NewUdpPlayer(info)
+func (p *SimPlayers) Add(udpPlayer *udp.UDPPlayer) {
+  var plr SimPlayer
+  plr.Stats = player.DefaultPlayerStats()
+  plr.Udp = udpPlayer
 
-  _, exists := p.playerMap.LoadOrStore(info.Id, plr)
+  _, exists := p.playerMap.LoadOrStore(plr.Udp.Id, &plr)
   if !exists {
     p.Count += 1
+    log.Printf("%v joined the simulation.", plr.Udp.Id)
   }
-
-  return plr
 }
 
 func (p *SimPlayers) Remove(id uuid.UUID) {
@@ -31,10 +32,10 @@ func (p *SimPlayers) Remove(id uuid.UUID) {
   log.Printf("%s left the simulation", id)
 }
 
-func (p *SimPlayers) GetPlayer(id uuid.UUID) *udp.UDPPlayer {
+func (p *SimPlayers) GetPlayer(id uuid.UUID) *SimPlayer {
   plr, ok := p.playerMap.Load(id)
   if ok {
-    return plr.(*udp.UDPPlayer)
+    return plr.(*SimPlayer)
   }
 
   return nil
@@ -42,8 +43,8 @@ func (p *SimPlayers) GetPlayer(id uuid.UUID) *udp.UDPPlayer {
 
 func (p *SimPlayers) Push(playerId uuid.UUID, msg udp.UDPMsg) {
   plr := p.GetPlayer(playerId)
-  if plr != nil && plr.GetState() >= udp.CONNECTED {
-    plr.AddMsg(msg)
+  if plr != nil && plr.Udp.GetState() >= udp.CONNECTED {
+    plr.Udp.Outgoing <- msg
   } else {
     log.Printf("Tried to add msg to player %s who doesnt exist", playerId)
   }
@@ -51,9 +52,9 @@ func (p *SimPlayers) Push(playerId uuid.UUID, msg udp.UDPMsg) {
 
 func (p *SimPlayers) PushAll(msg udp.UDPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
-    plr := value.(*udp.UDPPlayer)
-    if plr.GetState() >= udp.CONNECTED {
-      plr.AddMsg(msg);
+    plr := value.(*SimPlayer)
+    if plr.Udp.GetState() >= udp.CONNECTED {
+      plr.Udp.Outgoing <- msg
     }
     return true
   })
@@ -61,9 +62,9 @@ func (p *SimPlayers) PushAll(msg udp.UDPMsg) {
 
 func (p *SimPlayers) PushExcluding(playerId uuid.UUID, msg udp.UDPMsg) {
   p.playerMap.Range(func(key, value interface{}) bool {
-    plr := value.(*udp.UDPPlayer)
-    if plr.GetState() >= udp.CONNECTED && plr.GetPlayerId() != playerId {
-      plr.AddMsg(msg);
+    plr := value.(*SimPlayer)
+    if plr.Udp.GetState() >= udp.CONNECTED && plr.Udp.Id != playerId {
+      plr.Udp.Outgoing <- msg
     }
     return true
   })
@@ -71,9 +72,9 @@ func (p *SimPlayers) PushExcluding(playerId uuid.UUID, msg udp.UDPMsg) {
 
 func (p *SimPlayers) PackAndSend() {
   p.playerMap.Range(func(key, value interface{}) bool {
-    plr := value.(*udp.UDPPlayer)
-    if plr.GetState() >= udp.CONNECTED {
-      plr.PackAndSend()
+    plr := value.(*SimPlayer)
+    if plr.Udp.GetState() >= udp.CONNECTED {
+      plr.Udp.PackAndSend()
     }
     return true
   })

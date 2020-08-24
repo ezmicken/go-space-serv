@@ -233,7 +233,7 @@ func (ws *worldServer) interpretPhysics(bytes []byte) {
       head := 1
       l := len(bytes)
       for head < l {
-        bodyId, x, y := ws.deserializeState(bytes[head:head+6])
+        bodyId, _, _ := ws.deserializeState(bytes[head:head+6])
         head += 6
 
         plr := ws.players.GetPlayer(ws.bodyToPlayer[bodyId])

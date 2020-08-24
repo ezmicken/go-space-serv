@@ -76,7 +76,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
           case udp.ENTER:
             // TODO: verify rtt/ploss limit
             player := s.players.GetPlayer(playerId)
-            if player != nil && player.GetState() != udp.SPECTATING {
+            if player != nil && player.Udp.GetState() != udp.SPECTATING {
               log.Printf("player %s spawn when not spectating.", playerId)
               break
             }
@@ -94,13 +94,13 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
             ht.VelocityDelta = mgl32.Vec3{0, 0, 0}
             pBod.Initialize(ht)
             s.addControlledBody(playerId, pBod)
-            player.SetState(udp.PLAYING)
+            player.Udp.SetState(udp.PLAYING)
 
             log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
 
             // tell other players
             var response msg.EnterMsg
-            response.PlayerId = player.GetPlayerId()
+            response.PlayerId = player.Udp.Id
             response.BodyId = pBod.GetBody().Id
             response.X = uint32(spawnX)
             response.Y = uint32(spawnY)
@@ -114,12 +114,12 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
             s.toWorld <- worldSpawnMsg
           case udp.EXIT:
             player := s.players.GetPlayer(playerId)
-            if player != nil && player.GetState() == udp.PLAYING {
+            if player != nil && player.Udp.GetState() == udp.PLAYING {
               cb, ok := s.controlledBodies.Load(playerId)
               if ok && cb != nil {
                 bodyId := cb.(*ControlledBody).GetBody().Id
                 s.RemoveControlledBody(playerId)
-                player.SetState(udp.SPECTATING)
+                player.Udp.SetState(udp.SPECTATING)
 
                 // tell other playesr
                 var response msg.ExitMsg
@@ -273,14 +273,6 @@ func (s *Simulation) RemoveControlledBody(id uuid.UUID) {
 
 // Access
 /////////////
-
-func (s *Simulation) GetLastSync() int64 {
-  return s.lastSync
-}
-
-func (s *Simulation) GetSeq() uint16 {
-  return s.seq
-}
 
 func (s *Simulation) GetPlayerChan() chan udp.UDPMsg {
   return s.fromPlayers

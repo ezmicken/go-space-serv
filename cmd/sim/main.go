@@ -20,7 +20,6 @@ import (
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
-  "go-space-serv/internal/space/player"
   "go-space-serv/internal/space/sim"
 )
 
@@ -272,14 +271,9 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
                   ip := net.IP(ipBytes)
                   reader.Discard(int(ipLen[0]))
 
-                  var info player.Player
-                  info.Id = playerId
-                  info.Stats = player.DefaultPlayerStats()
-                  plr := ps.players.Add(&info)
+                  plr := udp.NewPlayer(ps.simulation.GetPlayerChan(), playerId, &ps.msgFactory)
                   if plr != nil {
-                    plr.SetSimChan(ps.simulation.GetPlayerChan())
-                    plr.SetMsgFactory(&ps.msgFactory)
-                    ps.ipsToPlayers.Store(ip.String(), playerId)
+                    ps.ipsToPlayers.Store(ip.String(), plr)
                     log.Printf("Storing %s <-> %v", ip.String(), playerId)
                   }
                 }
@@ -349,16 +343,18 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
   if valid {
     bytes := data
     _ = ps.pool.Submit(func() {
-      var plr *udp.UDPPlayer
-      playerId, ok := ps.ipsToPlayers.Load(ipString)
+      tmp, ok := ps.ipsToPlayers.Load(ipString)
       if ok {
-        plr = ps.players.GetPlayer(playerId.(uuid.UUID))
+        plr := tmp.(*udp.UDPPlayer)
+        if valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId() {
+          if plr.GetState() >= udp.CONNECTED {
+            plr.Unpack(bytes[4:])
+          } else if plr.AuthenticateConnection(bytes, connection) {
+            ps.players.Add(plr)
+          }
+        }
       }
 
-      valid = valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId()
-      if valid && plr != nil {
-        plr.PacketReceive(bytes, connection)
-      }
     })
   } else {
     log.Printf("Invalid IP %s", ipString)

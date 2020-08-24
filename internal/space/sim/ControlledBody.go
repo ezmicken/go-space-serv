@@ -8,8 +8,8 @@ import(
 )
 
 type ControlledBody struct {
-  controllingPlayer *udp.UDPPlayer
-  owningPlayer      *udp.UDPPlayer
+  controllingPlayer *SimPlayer
+  owningPlayer      *SimPlayer
   bod               *udp.UDPBody
   stateBuffer       *StateBuffer
 }
@@ -17,7 +17,7 @@ type ControlledBody struct {
 // instantiation
 ///////////////////////
 
-func NewControlledBody(plr *udp.UDPPlayer) (*ControlledBody) {
+func NewControlledBody(plr *SimPlayer) (*ControlledBody) {
   var cbod ControlledBody
   cbod.controllingPlayer = plr
   cbod.owningPlayer = plr
@@ -34,7 +34,7 @@ func (cb *ControlledBody) Initialize(ht HistoricalTransform) {
 }
 
 func (cb *ControlledBody) InputToState(seq int, moveshoot byte) {
-  stats := cb.controllingPlayer.GetStats()
+  stats := cb.controllingPlayer.Stats
 
   ht := cb.stateBuffer.Get(seq - 1)
 
@@ -116,18 +116,18 @@ func (cb *ControlledBody) GetBody() *udp.UDPBody {
   return cb.bod
 }
 
-func (cb *ControlledBody) SetControllingPlayer(player *udp.UDPPlayer) {
+func (cb *ControlledBody) SetControllingPlayer(player *SimPlayer) {
   cb.controllingPlayer = player
 }
 
-func (cb *ControlledBody) GetControllingPlayer() *udp.UDPPlayer {
+func (cb *ControlledBody) GetControllingPlayer() *SimPlayer {
   return cb.controllingPlayer
 }
 
-func (cb *ControlledBody) SetOwningPlayer(player *udp.UDPPlayer) {
+func (cb *ControlledBody) SetOwningPlayer(player *SimPlayer) {
   cb.owningPlayer = player
 }
 
-func (cb *ControlledBody) GetOwningPlayer() *udp.UDPPlayer {
+func (cb *ControlledBody) GetOwningPlayer() *SimPlayer {
   return cb.owningPlayer
 }
