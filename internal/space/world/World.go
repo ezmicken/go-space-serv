@@ -86,7 +86,7 @@ func (w *World) InterpretPhysics(bytes []byte) {
       plr := w.players.GetPlayer(w.bodyToPlayer[bodyId])
       if plr != nil {
         // TODO: update position and do polygon boolean stuff
-        plr.Update(x, y, w.worldMap.Poly)
+        plr.Update(x, y, w.worldMap)
       }
     }
   }
