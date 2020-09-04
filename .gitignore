@@ -27,3 +27,5 @@ bin/
 *.png
 *.svg
 *.prof
+
+assets/localMap
