@@ -9,7 +9,6 @@ import (
   "math/rand"
   "sync"
   "os"
-  "encoding/binary"
   "runtime/pprof"
 
   "github.com/panjf2000/gnet"
@@ -169,138 +168,59 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
   ps.worldConnOpen = true
   ps.state = snet.SETUP
 
-  const(
-    readingSize byte = iota
-    readingResolution
-    readingMap
-    readingEvent
-  )
-
-  var state byte = readingSize
-  var numBlockBytes uint32 = 0
-  var size uint32 = 0
-  var mapBuf []byte = nil
-  var mapBufRead uint32 = 0
-  var totalBytesRead int = 0
   reader := bufio.NewReader(c)
 
   for ps.state <= snet.ALIVE {
-    switch state {
-      case readingSize:
-        sizeBytes, err := reader.Peek(4)
+    event, err := reader.Peek(1)
+    if err == nil {
+      log.Printf("Received event from world %d", event)
+      reader.Discard(1)
+
+      if event[0] == byte(snet.IJoin) {
+        var ipLen []byte
+        var ipBytes []byte
+        var idBytes []byte
+        idBytes, err = reader.Peek(16)
         if err == nil {
-          numBlockBytes = snet.Read_uint32(sizeBytes)
-          size = helpers.Sqrt_uint32(numBlockBytes * 8)
-          mapBuf = make([]byte, numBlockBytes)
-
-          ps.worldMap.W = int(size)
-          ps.worldMap.H = int(size)
-
-          reader.Discard(4)
-          totalBytesRead += 4
-
-          state = readingResolution
-          log.Printf("Read worldMap size=%d", size)
-        } else {
-          ps.state = snet.SHUTDOWN
-          log.Printf(err.Error())
-        }
-      case readingResolution:
-        resBytes, err := reader.Peek(1)
-        if err == nil {
-          ps.worldMap.Resolution = int(resBytes[0])
-
-          reader.Discard(1)
-          totalBytesRead += 1
-
-          state = readingMap
-          log.Printf("Read worldMap resolution=%d", ps.worldMap.Resolution)
-        } else {
-          ps.state = snet.SHUTDOWN
-          log.Printf(err.Error())
-        }
-      case readingMap:
-        log.Printf("reading map bytes")
-        for b, err := reader.Peek(1); err == nil && mapBufRead < numBlockBytes; mapBufRead++ {
-          mapBuf[mapBufRead] = b[0]
-          totalBytesRead += 1
-          reader.Discard(1)
-        }
-        log.Printf("total bytes %d", totalBytesRead)
-        if err == nil {
-          log.Printf("finished reading %d/%d blocks", mapBufRead, numBlockBytes)
-          ps.worldMap.Deserialize(mapBuf)
-          reader.Reset(c)
-
-          state = readingEvent
-
-          // Tell world about our port and that we're ready.
-          portMsg := make([]byte, 5)
-          portMsg[0] = byte(snet.IReady)
-          binary.LittleEndian.PutUint32(portMsg[1:5], uint32(udpPort))
-          c.Write(portMsg)
-
-          // Start the simulation
-          ps.simulation.Start(&ps.worldMap, &ps.players, ps.toWorld);
-
-          // Signal that world is setup.
-          ps.state = snet.ALIVE
-        } else {
-          log.Printf("%s", err.Error())
-          ps.state = snet.SHUTDOWN
-        }
-      case readingEvent:
-        event, err := reader.Peek(1)
-        if err == nil {
-          log.Printf("Received event from world %d", event)
-          reader.Discard(1)
-
-          if event[0] == byte(snet.IJoin) {
-            var ipLen []byte
-            var ipBytes []byte
-            var idBytes []byte
-            idBytes, err = reader.Peek(16)
+          playerId, _ := uuid.FromBytes(idBytes)
+          reader.Discard(16)
+          ipLen, err = reader.Peek(1)
+          if err == nil {
+            reader.Discard(1)
+            ipBytes, err = reader.Peek(int(ipLen[0]))
             if err == nil {
-              playerId, _ := uuid.FromBytes(idBytes)
-              reader.Discard(16)
-              ipLen, err = reader.Peek(1)
-              if err == nil {
-                reader.Discard(1)
-                ipBytes, err = reader.Peek(int(ipLen[0]))
-                if err == nil {
-                  ip := net.IP(ipBytes)
-                  reader.Discard(int(ipLen[0]))
+              ip := net.IP(ipBytes)
+              reader.Discard(int(ipLen[0]))
 
-                  plr := udp.NewPlayer(ps.simulation.GetPlayerChan(), playerId, &ps.msgFactory)
-                  if plr != nil {
-                    ps.ipsToPlayers.Store(ip.String(), plr)
-                    log.Printf("Storing %s <-> %v", ip.String(), playerId)
-                  }
-                }
+              plr := udp.NewPlayer(ps.simulation.GetPlayerChan(), playerId, &ps.msgFactory)
+              if plr != nil {
+                ps.ipsToPlayers.Store(ip.String(), plr)
+                log.Printf("Storing %s <-> %v", ip.String(), playerId)
               }
             }
-          } else if event[0] == byte(snet.ILeave) {
-            var idBytes []byte
-            idBytes, err = reader.Peek(16)
-            if err == nil {
-              reader.Discard(16)
-              playerId, _ := uuid.FromBytes(idBytes)
-              ps.players.Remove(playerId)
-              ps.simulation.RemoveControlledBody(playerId)
-            }
-          } else if event[0] == byte(snet.IShutdown) {
-            ps.state = snet.SHUTDOWN
           }
         }
-
-        if err != nil && err.Error() == "EOF" {
-          ps.state = snet.SHUTDOWN // TODO: retry connecting to world
-          return
-        } else if err != nil && ps.state == snet.SHUTDOWN {
-          return
-        } else if err != nil {
-          log.Printf("worldConn err: " + err.Error())
+      } else if event[0] == byte(snet.ILeave) {
+        var idBytes []byte
+        idBytes, err = reader.Peek(16)
+        if err == nil {
+          reader.Discard(16)
+          playerId, _ := uuid.FromBytes(idBytes)
+          ps.players.Remove(playerId)
+          ps.simulation.RemoveControlledBody(playerId)
         }
+      } else if event[0] == byte(snet.IShutdown) {
+        ps.state = snet.SHUTDOWN
+      }
+    }
+
+    if err != nil && err.Error() == "EOF" {
+      ps.state = snet.SHUTDOWN // TODO: retry connecting to world
+      return
+    } else if err != nil && ps.state == snet.SHUTDOWN {
+      return
+    } else if err != nil {
+      log.Printf("worldConn err: " + err.Error())
     }
   }
 }
