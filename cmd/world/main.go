@@ -10,9 +10,6 @@ import (
   "github.com/panjf2000/gnet/pool/goroutine"
   "github.com/google/uuid"
 
-  // integer math
-  //"github.com/bxcodec/saint"
-
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/tcp"
@@ -45,21 +42,22 @@ var spawnX int = 1600;
 var spawnY int = 0;
 
 func main() {
-  log.Printf("Generating worldMap...")
-
   var plrs world.WorldPlayers
   plrs.Count = 0
 
-  w := world.NewWorld(&plrs, )
+  w, err := world.NewWorld(&plrs, "localMap")
+  if err != nil {
+    panic(err)
+  }
   p := goroutine.Default()
   defer p.Release()
 
   ws := &worldServer{
+    wld: w,
     pool: p,
     tick: 100000000,
     state: snet.WAIT_PHYS,
     players: &plrs,
-    wld: w,
     life: make(chan struct{}),
     shutdown: make(chan struct{}),
   }
@@ -74,6 +72,7 @@ func (ws *worldServer) live() {
   defer close(ws.life)
 
   go func() {
+    log.Printf("Awaiting simulation...")
     err := gnet.Serve(ws, "tcp://:9494", gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
     if err != nil {
       log.Fatal(err)
@@ -126,8 +125,6 @@ func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
   ws.physicsIP = snet.GetOutboundIP()
   ws.state = snet.SETUP
   log.Printf("Physics server connected, sending blocks.")
-
-  out = ws.wld.SerializeMap()
 
   return
 }
