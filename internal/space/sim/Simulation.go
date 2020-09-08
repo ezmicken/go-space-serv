@@ -41,8 +41,6 @@ func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers, worldC
   s.seq = 0
   s.lastSync = 0
   s.framesSinceLastSync = 0
-  s.worldMap.SpawnX = 1600
-  s.worldMap.SpawnY = 0
   s.ticker = time.NewTicker(time.Duration(helpers.GetConfiguredTimestepNanos()) * time.Nanosecond)
   go s.loop()
 }
@@ -81,9 +79,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
               break
             }
 
-            spawnX := s.worldMap.SpawnX
-            spawnY := s.worldMap.SpawnY
-            x, y := s.worldMap.GetCellCenter(spawnX, spawnY)
+            x, y := s.worldMap.GetSpawnPoint()
             pBod := NewControlledBody(player)
             var ht HistoricalTransform
             ht.Seq = int(s.seq)
@@ -96,14 +92,14 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
             s.addControlledBody(playerId, pBod)
             player.Udp.SetState(udp.PLAYING)
 
-            log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, spawnX, spawnY, x, y)
+            log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, world.SPAWNX, world.SPAWNY, x, y)
 
             // tell other players
             var response msg.EnterMsg
             response.PlayerId = player.Udp.Id
             response.BodyId = pBod.GetBody().Id
-            response.X = uint32(spawnX)
-            response.Y = uint32(spawnY)
+            response.X = uint32(world.SPAWNX)
+            response.Y = uint32(world.SPAWNY)
             s.players.PushAll(&response)
 
             // tell the map server
