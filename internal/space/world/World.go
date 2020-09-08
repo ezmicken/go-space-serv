@@ -16,23 +16,16 @@ type World struct {
   bodyToPlayer map[uint16]uuid.UUID
 }
 
-func NewWorld(wp *WorldPlayers) *World {
+func NewWorld(wp *WorldPlayers, mapName string) (*World, error) {
   var wld World
   wld.players = wp
-
-  var wm WorldMap
-  wm.W = 4096
-  wm.H = 4096
-  wm.ChunkSize = 16
-  wm.Resolution = 32
-  wm.Seed = 209323094
-  wm.Generate()
-  log.Printf("worldMap generated.")
-  wld.worldMap = &wm
-
+  wm, err := NewWorldMap(mapName)
+  if err != nil {
+    return nil, err
+  }
+  wld.worldMap = wm
   wld.bodyToPlayer = make(map[uint16]uuid.UUID)
-
-  return &wld
+  return &wld, nil
 }
 
 func (w *World) PlayerJoin(plr *WorldPlayer, physIp net.IP, physPort uint32) {
@@ -43,9 +36,7 @@ func (w *World) PlayerJoin(plr *WorldPlayer, physIp net.IP, physPort uint32) {
   plr.Tcp.Outgoing <- &playerInfoMsg
 
   // Tell this client about the world
-  var worldInfoMsg msg.WorldInfoMsg
-  worldInfoMsg.Size = uint32(w.worldMap.W)
-  worldInfoMsg.Res = byte(w.worldMap.Resolution)
+  worldInfoMsg := w.worldMap.GetWorldInfoMsg()
   plr.Tcp.Outgoing <- &worldInfoMsg
 
   // Tell this client about the physics server
@@ -90,10 +81,6 @@ func (w *World) InterpretPhysics(bytes []byte) {
       }
     }
   }
-}
-
-func (w *World) SerializeMap() []byte {
-  return w.worldMap.Serialize()
 }
 
 func deserializeState(bytes []byte) (id, x, y uint16) {

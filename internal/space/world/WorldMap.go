@@ -1,78 +1,73 @@
 package world
 
 import (
-  //"log"
+  "log"
+  "fmt"
   "math"
-  "encoding/binary"
+  "os"
+  "errors"
 
-  "github.com/ojrac/opensimplex-go"
   "github.com/akavel/polyclip-go"
 
-  "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world/msg"
 )
 
-type WorldMap struct {
-  W int
-  H int
-  Seed int64
-  Resolution int
-  ChunkSize int
-  SpawnX int
-  SpawnY int
-  Poly polyclip.Polygon
+// TODO: move to worldinfo
+const RESOLUTION float32 = 32
+const SPAWNX uint32 = 1600
+const SPAWNY uint32 = 0
 
-  blocks [][]BlockType
+type WorldMap struct {
+  info WorldInfo
+
+  Poly polyclip.Polygon
 }
 
 var viewSize int = 16
 
-func (wm *WorldMap) Generate() {
-  w := float64(wm.W)
-  h := float64(wm.H)
+func NewWorldMap(name string) (*WorldMap, error) {
+  metaFile, err := os.OpenFile(fmt.Sprintf("assets/%s/meta.chunks", name), os.O_RDONLY, 0644)
+  if err != nil {
+    return nil, err
+  }
 
+  stat, err2 := metaFile.Stat()
+  if err != nil {
+    return nil, err2
+  }
+  metaFileSize := stat.Size()
+  bytes := make([]byte, metaFileSize)
+  bytesRead, err3 := metaFile.Read(bytes)
+  if err3 != nil {
+    return nil, err3
+  }
+
+  if int64(bytesRead) != metaFileSize {
+    return nil, errors.New(fmt.Sprintf("failed to read meta file %d/%d", bytesRead, metaFileSize))
+  }
+
+  var wm WorldMap
+  wm.info = DeserializeWorldInfo(bytes)
   wm.Poly = polyclip.Polygon{{
     {0, 0},
-    {w, 0},
-    {w, h},
-    {0, h},
+    {float64(wm.info.Size), float64(wm.info.Size)},
   }}
 
-  noise := opensimplex.New(wm.Seed)
+  log.Printf("Loaded map %s\n%v\n", name, wm.info)
 
-  // initialize multidimensional array
-  wm.blocks = make([][]BlockType, wm.H)
-  for i := range wm.blocks {
-    wm.blocks[i] = make([]BlockType, wm.W)
-  }
-
-  for y := 0; y < wm.H; y++ {
-    for x := 0; x < wm.W; x++ {
-      floatVal := noise.Eval2(float64(x) * 0.05, float64(y) * 0.05)
-      if floatVal > 0.36 {
-        wm.blocks[y][x] = GRAY
-      } else {
-        wm.blocks[y][x] = EMPTY
-      }
-    }
-  }
-
-  return
-}
-
-func (wm *WorldMap) GetBlock(x, y int) BlockType {
-  return wm.blocks[x][y]
+  return &wm, nil
 }
 
 func (wm *WorldMap) GetCellCenter(x, y int) (xPos, yPos float32) {
-  xPos = float32(wm.Resolution * x + (wm.Resolution / 2))
-  yPos = float32(wm.Resolution * y + (wm.Resolution / 2))
+  halfRes := RESOLUTION / 2
+  xPos = RESOLUTION * float32(x) + halfRes
+  yPos = RESOLUTION * float32(y) + halfRes
   return
 }
 
 func (wm *WorldMap) GetCellFromPosition(xPos, yPos float32) (x, y int) {
-  x = int(math.Floor(float64(xPos / float32(wm.Resolution))))
-  y = int(math.Floor(float64(yPos / float32(wm.Resolution))))
+  x = int(math.Floor(float64(xPos / float32(RESOLUTION))))
+  y = int(math.Floor(float64(yPos / float32(RESOLUTION))))
   return
 }
 
@@ -80,14 +75,14 @@ func (wm *WorldMap) serializeChunk(x, y int, id uint16) msg.BlocksMsg {
   var blocksMsg msg.BlocksMsg
   blocksMsg.Id = id
 
-  currentState := wm.blocks[y][x]
+  currentState := EMPTY//wm.blocks[y][x]
   var newState BlockType
   currentCount := 0
   blocksMsg.Data = []byte{byte(currentState)}
 
-  for yi := 0; yi < wm.ChunkSize; yi++ {
-    for xi := 0; xi < wm.ChunkSize; xi++ {
-      newState = wm.blocks[y+yi][x+xi]
+  for yi := 0; yi < int(wm.info.ChunkSize); yi++ {
+    for xi := 0; xi < int(wm.info.ChunkSize); xi++ {
+      newState = EMPTY//wm.blocks[y+yi][x+xi]
       if newState == currentState {
         currentCount++
       } else {
@@ -128,8 +123,9 @@ func (wm *WorldMap) SerializeChunks(poly polyclip.Polygon) []msg.BlocksMsg {
 }
 
 func (wm *WorldMap) chunkIdFromPoint(point polyclip.Point) uint16 {
-  return uint16(point.Y * float64(wm.W)) + uint16(point.X)
+  return uint16(point.Y * float64(wm.info.Size)) + uint16(point.X)
 }
+
 func clampTo16(val int) int {
   return (val + 8) &^ 0xF
 }
@@ -143,65 +139,19 @@ func clampToChunks(rect polyclip.Rectangle) polyclip.Rectangle {
 }
 
 func (wm *WorldMap) SerializeChunk(id uint16) msg.BlocksMsg {
-  x := int(id) % wm.W * wm.ChunkSize
-  y := int(id) / wm.W * wm.ChunkSize
+  x := int(id) % int(wm.info.Size * wm.info.ChunkSize)
+  y := int(id) / int(wm.info.Size * wm.info.ChunkSize)
 
   return wm.serializeChunk(x, y, id)
 }
 
-func (wm *WorldMap) Serialize() []byte {
-  numBlocks := wm.W * wm.H
-
-  // map + bytes.length(uint32) + width(uint32) + height(uint32) + resolution(byte)
-  bytes := make([]byte, (numBlocks/8) + 4 + 1)
-  binary.LittleEndian.PutUint32(bytes[:4], uint32(numBlocks/8))
-  bytes[4] = byte(wm.Resolution)
-
-  x := 0
-  y := 0
-  currentByte := 5
-  currentBit := 0
-  for i := 0; i < numBlocks; i++ {
-    if wm.blocks[y][x] != EMPTY {
-      bytes[currentByte] |= (1 << currentBit)
-    }
-
-    currentBit++
-    if currentBit > 7 {
-      currentBit = 0
-      currentByte++
-    }
-
-    x++
-    if x >= wm.W {
-      x = 0
-      y++
-    }
-  }
-
-  return bytes
+func (wm *WorldMap) GetWorldInfoMsg() msg.WorldInfoMsg {
+  var worldInfoMsg msg.WorldInfoMsg
+  worldInfoMsg.Size = uint32(wm.info.Size)
+  worldInfoMsg.Res = byte(RESOLUTION)
+  return worldInfoMsg
 }
 
-
-func (wm *WorldMap) Deserialize(bytes []byte) {
-  wm.blocks = make([][]BlockType, wm.H)
-  for i := range wm.blocks {
-    wm.blocks[i] = make([]BlockType, wm.W)
-  }
-
-  x := 0
-  y := 0
-  for currentByte := 0; y < wm.H; currentByte++ {
-    for currentBit := 0; currentBit < 8; currentBit++ {
-      if helpers.BitOn(bytes[currentByte], currentBit) {
-        wm.blocks[y][x] = GRAY
-      }
-
-      x++
-      if x >= wm.W {
-        x = 0
-        y++
-      }
-    }
-  }
+func (wm *WorldMap) GetSpawnPoint() (x, y float32) {
+  return wm.GetCellCenter(int(SPAWNX), int(SPAWNY))
 }
