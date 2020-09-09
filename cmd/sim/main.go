@@ -10,6 +10,7 @@ import (
   "sync"
   "os"
   "runtime/pprof"
+  "encoding/binary"
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
@@ -169,6 +170,16 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
   ps.state = snet.SETUP
 
   reader := bufio.NewReader(c)
+
+  // Tell world about our port and that we're ready.
+  portMsg := make([]byte, 5)
+  portMsg[0] = byte(snet.IReady)
+  binary.LittleEndian.PutUint32(portMsg[1:5], uint32(udpPort))
+  c.Write(portMsg)
+
+  ps.simulation.Start(&ps.worldMap, &ps.players, ps.toWorld)
+
+  ps.state = snet.ALIVE
 
   for ps.state <= snet.ALIVE {
     event, err := reader.Peek(1)
