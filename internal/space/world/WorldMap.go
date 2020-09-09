@@ -48,9 +48,13 @@ func NewWorldMap(name string) (*WorldMap, error) {
 
   var wm WorldMap
   wm.info = DeserializeWorldInfo(bytes)
+
+  sizeInBlocks := float64(wm.info.Size * wm.info.ChunkSize)
   wm.Poly = polyclip.Polygon{{
     {0, 0},
-    {float64(wm.info.Size), float64(wm.info.Size)},
+    {0, sizeInBlocks},
+    {sizeInBlocks, sizeInBlocks},
+    {sizeInBlocks, 0},
   }}
 
   log.Printf("Loaded map %s\n%v\n", name, wm.info)

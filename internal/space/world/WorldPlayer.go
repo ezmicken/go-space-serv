@@ -39,7 +39,6 @@ func (p *WorldPlayer) Update(x, y uint16, worldMap *WorldMap) {
   unexplored := view.Construct(polyclip.DIFFERENCE, p.explored)
 
   blocksMsgs := worldMap.SerializeChunks(unexplored)
-  log.Printf("%d", len(blocksMsgs))
   for _, m := range blocksMsgs {
     p.Tcp.Outgoing <- &m
   }
