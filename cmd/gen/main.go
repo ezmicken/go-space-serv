@@ -3,23 +3,24 @@ package main
 import(
   "os"
   "path/filepath"
-  "compress/gzip"
+  "compress/zlib"
   "fmt"
   "flag"
-  "sync"
 
   "github.com/ojrac/opensimplex-go"
   "go-space-serv/internal/space/world"
 )
 
-var wg sync.WaitGroup
+// 4096 x 4096 means chunk id can be uint16
+// if this is too small upgrade to uint32 :(
 
 func main() {
-  flagCPF := flag.Uint("cpf", 256, "Chunks Per File")
-  flagCSize := flag.Uint("csize", 128, "Chunk Size")
-  flagSize := flag.Uint("size", 256,"Map Size")
+  flagCPF := flag.Uint("cpf", 32768, "Chunks Per File")
+  flagCSize := flag.Uint("csize", 16, "Chunk Size")
+  flagSize := flag.Uint("size", 4096, "Map Size")
   flagSeed := flag.Uint64("seed", 209323094, "Seed for noise generation")
   flagThreshold := flag.Float64("threshold", 0.36, "Threshold for empty blocks")
+  flagClean := flag.Bool("clean", false, "Clean but do not generate map.")
 
   flag.Parse()
 
@@ -30,25 +31,37 @@ func main() {
     return
   }
 
+  errMkdir := os.MkdirAll(dir, 0777)
+  if errMkdir != nil {
+    fmt.Println(errMkdir)
+    return
+  }
+
   var info world.WorldInfo
   info.ChunksPerFile = uint32(*flagCPF)
   info.ChunkSize = uint32(*flagCSize)
   info.Size = uint32(*flagSize)
   info.BlocksPerChunk = info.ChunkSize * info.ChunkSize
-  info.BlocksPerFile = info.BlocksPerChunk * info.Size
-  info.NumFiles = (info.Size * info.Size) / info.ChunksPerFile
+  info.BlocksPerFile = info.BlocksPerChunk * info.ChunksPerFile
+  info.NumFiles = uint32((int64(info.Size) * int64(info.Size)) / int64(info.ChunksPerFile))
   info.Seed = *flagSeed
   info.Threshold = *flagThreshold
+
+  cleanOnly := *flagClean
 
   fmt.Printf("%v", info)
 
   fmt.Printf("\nCleaning out %s...", dir)
   cleanFiles(dir)
 
+  if (cleanOnly) {
+    return
+  }
+
   fmt.Printf("\nGenerating noise...")
   noise := opensimplex.New(int64(info.Seed))
 
-  fmt.Printf("\nGenerating map")
+  fmt.Printf("\nGenerating map...\r\n")
   var fileId uint32
 
   // chunk coordinate in world space
@@ -82,6 +95,7 @@ func main() {
           xCoord = (chunkX * info.ChunkSize) + x
           yCoord = (chunkY * info.ChunkSize) + y
           noiseVal := noise.Eval2(float64(xCoord) * 0.05, float64(yCoord) * 0.05)
+
           if noiseVal > info.Threshold {
             fileBytes[fileIdx] = 1
           } else {
@@ -94,16 +108,16 @@ func main() {
     }
 
     fileBytesCopy := fileBytes
-    go writeChunksToFile(fileBytesCopy, fmt.Sprintf("%s/%03d.chunks", dir, fileId))
+    writeChunksToFile(fileBytesCopy, fmt.Sprintf("%s/%03d.chunks", dir, fileId))
+    fmt.Printf("\r%d/%d", fileId, info.NumFiles)
   }
 
-  wg.Wait()
-
-  metaFile, err := os.OpenFile(fmt.Sprintf("%s/meta.chunks", dir), os.O_CREATE|os.O_WRONLY, 0644)
+  metaFile, err := os.Create(fmt.Sprintf("%s/meta.chunks", dir))
   if err != nil {
     fmt.Println(err)
     return
   }
+  defer metaFile.Close()
 
   fmt.Printf("\nSaving info...")
   metaBytes := world.SerializeWorldInfo(info)
@@ -133,29 +147,27 @@ func cleanFiles(dir string) {
 }
 
 func writeChunksToFile(fileBytes []byte, fileName string) {
-  wg.Add(1)
-
-  f, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, 0644)
+  f, err := os.Create(fileName)
   if err != nil {
     fmt.Println(err)
-    wg.Done()
     return
   }
+  defer f.Close()
 
-  zw := gzip.NewWriter(f)
+  zw := zlib.NewWriter(f)
   _, errG := zw.Write(fileBytes)
   if errG != nil {
     fmt.Println(err)
-    wg.Done()
     return
   }
-  fmt.Printf(".")
 
   if err = zw.Close(); err != nil {
     fmt.Println(err)
-    wg.Done()
     return
   }
 
-  wg.Done()
+  if err = f.Sync(); err != nil {
+    fmt.Println(err)
+    return
+  }
 }
