@@ -47,7 +47,8 @@ func (p *WorldPlayer) Update(x, y uint16, worldMap *WorldMap) {
   // Serialize the chunks and send to player.
   blocksMsgs := worldMap.SerializeChunks(unexplored)
   for _, m := range blocksMsgs {
-    p.Tcp.Outgoing <- &m
+    msg := m
+    p.Tcp.Outgoing <- &msg
   }
 
   // Add unexplored to explored.
