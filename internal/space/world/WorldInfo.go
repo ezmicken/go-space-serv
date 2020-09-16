@@ -7,6 +7,7 @@ import(
 )
 
 type WorldInfo struct {
+  // Serialized
   ChunksPerFile   uint32
   ChunkSize       uint32
   Size            uint32
@@ -15,6 +16,9 @@ type WorldInfo struct {
   NumFiles        uint32
   Seed            uint64
   Threshold       float64
+
+  // Not serialized
+  Name            string
 }
 
 func SerializeWorldInfo(info WorldInfo) []byte {
@@ -30,6 +34,17 @@ func SerializeWorldInfo(info WorldInfo) []byte {
   binary.LittleEndian.PutUint64(result[32:40], math.Float64bits(info.Threshold))
 
   return result
+}
+
+func SerializeWorldInfoSlice(info WorldInfo, slice []byte) {
+  binary.LittleEndian.PutUint32(slice[:4], info.ChunksPerFile)
+  binary.LittleEndian.PutUint32(slice[4:8], info.ChunkSize)
+  binary.LittleEndian.PutUint32(slice[8:12], info.Size)
+  binary.LittleEndian.PutUint32(slice[12:16], info.BlocksPerChunk)
+  binary.LittleEndian.PutUint32(slice[16:20], info.BlocksPerFile)
+  binary.LittleEndian.PutUint32(slice[20:24], info.NumFiles)
+  binary.LittleEndian.PutUint64(slice[24:32], info.Seed)
+  binary.LittleEndian.PutUint64(slice[32:40], math.Float64bits(info.Threshold))
 }
 
 func DeserializeWorldInfo(data []byte) WorldInfo {
@@ -54,7 +69,7 @@ func (info WorldInfo) String() string {
   result = fmt.Sprintf("%s%d\t\tChunk Size\n", result, info.ChunkSize)
   result = fmt.Sprintf("%s%d\t\tSize\n", result, info.Size)
   result = fmt.Sprintf("%s%d\t\tBlocks Per Chunk\n", result, info.BlocksPerChunk)
-  result = fmt.Sprintf("%s%d\t\tBlocks Per File\n", result, info.BlocksPerFile)
+  result = fmt.Sprintf("%s%d\tBlocks Per File\n", result, info.BlocksPerFile)
   result = fmt.Sprintf("%s%d\t\tFiles\n", result, info.NumFiles)
   result = fmt.Sprintf("%s%d\tSeed\n", result, info.Seed)
   result = fmt.Sprintf("%s%f\tThreshold\n", result, info.Threshold)
