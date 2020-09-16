@@ -19,6 +19,7 @@ const SPAWNY uint32 = 0
 
 type WorldMap struct {
   info WorldInfo
+  chunker *Chunker
 
   Poly polyclip.Polygon
 }
@@ -26,7 +27,7 @@ type WorldMap struct {
 var viewSize int = 16
 
 func NewWorldMap(name string) (*WorldMap, error) {
-  metaFile, err := os.OpenFile(fmt.Sprintf("assets/%s/meta.chunks", name), os.O_RDONLY, 0644)
+  metaFile, err := os.Open(fmt.Sprintf("assets/%s/meta.chunks", name))
   if err != nil {
     return nil, err
   }
@@ -48,6 +49,7 @@ func NewWorldMap(name string) (*WorldMap, error) {
 
   var wm WorldMap
   wm.info = DeserializeWorldInfo(bytes)
+  wm.info.Name = name
 
   sizeInBlocks := float64(wm.info.Size * wm.info.ChunkSize)
   wm.Poly = polyclip.Polygon{{
@@ -56,6 +58,8 @@ func NewWorldMap(name string) (*WorldMap, error) {
     {sizeInBlocks, sizeInBlocks},
     {sizeInBlocks, 0},
   }}
+
+  wm.chunker = NewChunker(wm.info)
 
   log.Printf("Loaded map %s\n%v\n", name, wm.info)
 
@@ -79,27 +83,10 @@ func (wm *WorldMap) serializeChunk(x, y int, id uint16) msg.BlocksMsg {
   var blocksMsg msg.BlocksMsg
   blocksMsg.Id = id
 
-  currentState := EMPTY//wm.blocks[y][x]
-  var newState BlockType
-  currentCount := 0
-  blocksMsg.Data = []byte{byte(currentState)}
+  fileId := uint16(math.Floor(float64(uint32(id) / wm.info.ChunksPerFile)))
 
-  for yi := 0; yi < int(wm.info.ChunkSize); yi++ {
-    for xi := 0; xi < int(wm.info.ChunkSize); xi++ {
-      newState = EMPTY//wm.blocks[y+yi][x+xi]
-      if newState == currentState {
-        currentCount++
-      } else {
-        currentState = newState
-        blocksMsg.Data = append(blocksMsg.Data, []byte{byte(currentCount), byte(currentState)}...)
-        currentCount = 1
-      }
-    }
-  }
-
-  if currentCount > 0 {
-    blocksMsg.Data = append(blocksMsg.Data, byte(currentCount))
-  }
+  serializedChunk := wm.chunker.GetChunk(id, fileId)
+  blocksMsg.Data = append([]byte{}, serializedChunk...)
 
   return blocksMsg
 }
@@ -108,7 +95,9 @@ func (wm *WorldMap) SerializeChunks(poly polyclip.Polygon) []msg.BlocksMsg {
   numContours := len(poly)
   msgs := []msg.BlocksMsg{}
   for i := 0; i < numContours; i++ {
-    bb := clampToChunks(poly[i].BoundingBox())
+    log.Printf("unclamped: %v", poly[i].BoundingBox())
+    bb := wm.clampToChunks(poly[i].BoundingBox())
+    log.Printf("clamped: %v", bb)
     pY := bb.Min.Y;
     pX := bb.Min.X;
     chunkId := wm.chunkIdFromPoint(bb.Min)
@@ -116,10 +105,10 @@ func (wm *WorldMap) SerializeChunks(poly polyclip.Polygon) []msg.BlocksMsg {
       for pX < bb.Max.X {
         msgs = append(msgs, wm.serializeChunk(int(pX), int(pY), chunkId))
         chunkId++
-        pX += 16
+        pX += float64(wm.info.ChunkSize)
       }
       pX = bb.Min.X
-      pY += 16
+      pY += float64(wm.info.ChunkSize)
       chunkId = wm.chunkIdFromPoint(polyclip.Point{pX, pY})
     }
   }
@@ -127,18 +116,20 @@ func (wm *WorldMap) SerializeChunks(poly polyclip.Polygon) []msg.BlocksMsg {
 }
 
 func (wm *WorldMap) chunkIdFromPoint(point polyclip.Point) uint16 {
-  return uint16(point.Y * float64(wm.info.Size)) + uint16(point.X)
+  chunkX := point.X/float64(wm.info.ChunkSize)
+  chunkY := point.Y/float64(wm.info.ChunkSize)
+  return uint16(chunkY * float64(wm.info.Size)) + uint16(chunkX)
 }
 
-func clampTo16(val int) int {
+func (wm *WorldMap) clampToChunk(val int) int {
   return (val + 8) &^ 0xF
 }
 
-func clampToChunks(rect polyclip.Rectangle) polyclip.Rectangle {
-  rect.Min.X = float64(clampTo16(int(rect.Min.X)))
-  rect.Min.Y = float64(clampTo16(int(rect.Min.Y)))
-  rect.Max.X = float64(clampTo16(int(rect.Max.X)))
-  rect.Max.Y = float64(clampTo16(int(rect.Max.Y)))
+func (wm *WorldMap) clampToChunks(rect polyclip.Rectangle) polyclip.Rectangle {
+  rect.Min.X = float64(wm.clampToChunk(int(rect.Min.X)))
+  rect.Min.Y = float64(wm.clampToChunk(int(rect.Min.Y)))
+  rect.Max.X = float64(wm.clampToChunk(int(rect.Max.X)))
+  rect.Max.Y = float64(wm.clampToChunk(int(rect.Max.Y)))
   return rect
 }
 
@@ -151,7 +142,7 @@ func (wm *WorldMap) SerializeChunk(id uint16) msg.BlocksMsg {
 
 func (wm *WorldMap) GetWorldInfoMsg() msg.WorldInfoMsg {
   var worldInfoMsg msg.WorldInfoMsg
-  worldInfoMsg.Size = uint32(wm.info.Size)
+  worldInfoMsg.Size = uint32(wm.info.Size * wm.info.ChunkSize)
   worldInfoMsg.Res = byte(RESOLUTION)
   return worldInfoMsg
 }
