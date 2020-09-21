@@ -11,13 +11,13 @@ import(
   "go-space-serv/internal/space/world"
 )
 
-// 4096 x 4096 means chunk id can be uint16
+// 512 x 512 means chunk id can be uint16
 // if this is too small upgrade to uint32 :(
 
 func main() {
-  flagCPF := flag.Uint("cpf", 32768, "Chunks Per File")
-  flagCSize := flag.Uint("csize", 16, "Chunk Size")
-  flagSize := flag.Uint("size", 4096, "Map Size")
+  flagCPF := flag.Uint("cpf", 512, "Chunks Per File")
+  flagCSize := flag.Uint("csize", 128, "Chunk Size")
+  flagSize := flag.Uint("size", 512, "Map Size")
   flagSeed := flag.Uint64("seed", 209323094, "Seed for noise generation")
   flagThreshold := flag.Float64("threshold", 0.36, "Threshold for empty blocks")
   flagClean := flag.Bool("clean", false, "Clean but do not generate map.")
