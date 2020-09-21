@@ -16,7 +16,7 @@ const (
   CONNECTED
 )
 
-const packetSize int = 1024
+const PacketSize int = 1024
 
 type TCPPlayer struct {
   Id              uuid.UUID
@@ -45,9 +45,9 @@ func (p *TCPPlayer) Connected() {
 }
 
 func (p *TCPPlayer) Tx() {
-  packet := make([]byte, packetSize)
+  packet := make([]byte, PacketSize)
   head := 2
-  ticker := time.NewTicker(time.Duration(500) * time.Millisecond)
+  ticker := time.NewTicker(time.Duration(100) * time.Millisecond)
   defer ticker.Stop()
 
   for {
@@ -55,30 +55,18 @@ func (p *TCPPlayer) Tx() {
       log.Printf("disconnected")
       break
     }
-    for {
-      var m TCPMsg
-      fin := false
-      select {
-      case m = <- p.Outgoing:
-        head = m.Serialize(packet, head)
-        if head >= packetSize {
-          log.Printf("packet is max size")
-          fin = true
-        }
-      default:
-        fin = true
-      }
-
-      if fin {
-        break
-      }
+    var m TCPMsg
+    select {
+    case m = <- p.Outgoing:
+      head = m.Serialize(packet, head)
     }
 
     if head > 2 {
+      toSend := packet
       binary.LittleEndian.PutUint16(packet[0:2], uint16(head - 2))
-      p.connection.AsyncWrite(packet[:head])
+      p.connection.AsyncWrite(toSend[:head])
       head = 2
-      packet = make([]byte, packetSize)
+      packet = make([]byte, PacketSize)
     }
 
     <- ticker.C
