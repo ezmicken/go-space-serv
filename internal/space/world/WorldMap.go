@@ -121,15 +121,11 @@ func (wm *WorldMap) chunkIdFromPoint(point polyclip.Point) uint16 {
   return uint16(chunkY * float64(wm.info.Size)) + uint16(chunkX)
 }
 
-func (wm *WorldMap) clampToChunk(val int) int {
-  return (val + 8) &^ 0xF
-}
-
 func (wm *WorldMap) clampToChunks(rect polyclip.Rectangle) polyclip.Rectangle {
-  rect.Min.X = float64(wm.clampToChunk(int(rect.Min.X)))
-  rect.Min.Y = float64(wm.clampToChunk(int(rect.Min.Y)))
-  rect.Max.X = float64(wm.clampToChunk(int(rect.Max.X)))
-  rect.Max.Y = float64(wm.clampToChunk(int(rect.Max.Y)))
+  rect.Min.X = float64((int(rect.Min.X) - 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Min.X)))
+  rect.Min.Y = float64((int(rect.Min.Y) - 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Min.Y)))
+  rect.Max.X = float64((int(rect.Max.X) + 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Max.X)))
+  rect.Max.Y = float64((int(rect.Max.Y) + 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Max.Y)))
   return rect
 }
 
@@ -142,8 +138,11 @@ func (wm *WorldMap) SerializeChunk(id uint16) msg.BlocksMsg {
 
 func (wm *WorldMap) GetWorldInfoMsg() msg.WorldInfoMsg {
   var worldInfoMsg msg.WorldInfoMsg
-  worldInfoMsg.Size = uint32(wm.info.Size * wm.info.ChunkSize)
-  worldInfoMsg.Res = byte(RESOLUTION)
+  worldInfoMsg.ChunksPerFile = wm.info.ChunksPerFile
+  worldInfoMsg.ChunkSize = wm.info.ChunkSize
+  worldInfoMsg.Size = wm.info.Size
+  worldInfoMsg.Seed = wm.info.Seed
+  worldInfoMsg.Threshold = wm.info.Threshold
   return worldInfoMsg
 }
 
