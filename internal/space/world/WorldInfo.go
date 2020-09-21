@@ -36,17 +36,6 @@ func SerializeWorldInfo(info WorldInfo) []byte {
   return result
 }
 
-func SerializeWorldInfoSlice(info WorldInfo, slice []byte) {
-  binary.LittleEndian.PutUint32(slice[:4], info.ChunksPerFile)
-  binary.LittleEndian.PutUint32(slice[4:8], info.ChunkSize)
-  binary.LittleEndian.PutUint32(slice[8:12], info.Size)
-  binary.LittleEndian.PutUint32(slice[12:16], info.BlocksPerChunk)
-  binary.LittleEndian.PutUint32(slice[16:20], info.BlocksPerFile)
-  binary.LittleEndian.PutUint32(slice[20:24], info.NumFiles)
-  binary.LittleEndian.PutUint64(slice[24:32], info.Seed)
-  binary.LittleEndian.PutUint64(slice[32:40], math.Float64bits(info.Threshold))
-}
-
 func DeserializeWorldInfo(data []byte) WorldInfo {
   var result WorldInfo
 
