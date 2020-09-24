@@ -36,7 +36,7 @@ func (c *Chunker) GetChunk(chunkId, fileId uint16) []byte {
 
   c.access[fileId] = helpers.NowMillis()
 
-  chunkStart := uint32(chunkId) - (uint32(fileId) * c.info.ChunksPerFile)
+  chunkStart := (uint32(chunkId) - (uint32(fileId) * c.info.ChunksPerFile)) * c.info.BlocksPerChunk
   chunkEnd := chunkStart + c.info.BlocksPerChunk
   chunkSlice := file[chunkStart:chunkEnd]
 
