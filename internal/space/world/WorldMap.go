@@ -20,6 +20,7 @@ const SPAWNY uint32 = 0
 type WorldMap struct {
   info WorldInfo
   chunker *Chunker
+  sizeInBlocks float64
 
   Poly polyclip.Polygon
 }
@@ -50,6 +51,7 @@ func NewWorldMap(name string) (*WorldMap, error) {
   var wm WorldMap
   wm.info = DeserializeWorldInfo(bytes)
   wm.info.Name = name
+  wm.sizeInBlocks = float64(wm.info.Size * wm.info.ChunkSize)
 
   sizeInBlocks := float64(wm.info.Size * wm.info.ChunkSize)
   wm.Poly = polyclip.Polygon{{
@@ -91,27 +93,26 @@ func (wm *WorldMap) serializeChunk(x, y int, id uint16) msg.BlocksMsg {
   return blocksMsg
 }
 
-func (wm *WorldMap) SerializeChunks(poly polyclip.Polygon) []msg.BlocksMsg {
-  numContours := len(poly)
+// Assumes bb is clamped to chunks
+func (wm *WorldMap) Explore(bb polyclip.Rectangle) []msg.BlocksMsg {
   msgs := []msg.BlocksMsg{}
-  for i := 0; i < numContours; i++ {
-    log.Printf("unclamped: %v", poly[i].BoundingBox())
-    bb := wm.clampToChunks(poly[i].BoundingBox())
-    log.Printf("clamped: %v", bb)
-    pY := bb.Min.Y;
-    pX := bb.Min.X;
-    chunkId := wm.chunkIdFromPoint(bb.Min)
-    for pY < bb.Max.Y {
-      for pX < bb.Max.X {
-        msgs = append(msgs, wm.serializeChunk(int(pX), int(pY), chunkId))
-        chunkId++
-        pX += float64(wm.info.ChunkSize)
-      }
-      pX = bb.Min.X
-      pY += float64(wm.info.ChunkSize)
-      chunkId = wm.chunkIdFromPoint(polyclip.Point{pX, pY})
+
+  log.Printf("exploring: %v", bb)
+  pY := bb.Min.Y;
+  pX := bb.Min.X;
+  chunkId := wm.chunkIdFromPoint(polyclip.Point{pX, pY})
+
+  for pY < bb.Max.Y {
+    for pX < bb.Max.X {
+      msgs = append(msgs, wm.serializeChunk(int(pX), int(pY), chunkId))
+      chunkId++
+      pX += float64(wm.info.ChunkSize)
     }
+    pX = bb.Min.X
+    pY += float64(wm.info.ChunkSize)
+    chunkId = wm.chunkIdFromPoint(polyclip.Point{pX, pY})
   }
+
   return msgs
 }
 
@@ -121,11 +122,48 @@ func (wm *WorldMap) chunkIdFromPoint(point polyclip.Point) uint16 {
   return uint16(chunkY * float64(wm.info.Size)) + uint16(chunkX)
 }
 
-func (wm *WorldMap) clampToChunks(rect polyclip.Rectangle) polyclip.Rectangle {
-  rect.Min.X = float64((int(rect.Min.X) - 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Min.X)))
-  rect.Min.Y = float64((int(rect.Min.Y) - 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Min.Y)))
-  rect.Max.X = float64((int(rect.Max.X) + 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Max.X)))
-  rect.Max.Y = float64((int(rect.Max.Y) + 64) &^ 0x7F)//float64(wm.clampToChunk(int(rect.Max.Y)))
+func (wm *WorldMap) ClampToChunks(rect polyclip.Rectangle) polyclip.Rectangle {
+  // expand rectangle to multiple of chunk size.
+  rect.Min.X = float64((int(rect.Min.X) - 64) &^ 0x7F)
+  rect.Min.Y = float64((int(rect.Min.Y) - 64) &^ 0x7F)
+  rect.Max.X = float64((int(rect.Max.X) + 64) &^ 0x7F)
+  rect.Max.Y = float64((int(rect.Max.Y) + 64) &^ 0x7F)
+
+  // clamp to world bounds
+  if rect.Min.X < 0 { rect.Min.X = 0 }
+  if rect.Min.Y < 0 { rect.Min.Y = 0 }
+  if rect.Max.X > wm.sizeInBlocks { rect.Max.X = wm.sizeInBlocks }
+  if rect.Max.Y > wm.sizeInBlocks { rect.Max.Y = wm.sizeInBlocks }
+
+  // Correct non-rectangles.
+  if rect.Min.X == rect.Max.X {
+    if rect.Min.X > 128 {
+      rect.Min.X -= 128
+    } else if rect.Max.X < (wm.sizeInBlocks - 128) {
+      rect.Max.X += 128
+    } else if rect.Min.X == 0 {
+      rect.Max.X += 128
+    } else if rect.Max.X == wm.sizeInBlocks {
+      rect.Min.X -= 128
+    } else {
+      log.Printf("Unable to correct x of rectangle %v", rect)
+    }
+  }
+
+  if rect.Min.Y == rect.Max.Y {
+    if rect.Min.Y > 128 {
+      rect.Min.Y -= 128
+    } else if rect.Max.Y < (wm.sizeInBlocks - 128) {
+      rect.Max.Y += 128
+    } else if rect.Min.Y == 0 {
+      rect.Max.Y += 128
+    } else if rect.Max.Y == wm.sizeInBlocks {
+      rect.Min.Y -= 128
+    } else {
+      log.Printf("Unable to correct y of rectangle %v", rect)
+    }
+  }
+
   return rect
 }
 

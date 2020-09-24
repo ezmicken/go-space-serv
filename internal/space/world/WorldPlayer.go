@@ -1,6 +1,7 @@
 package world
 
 import (
+  //"log"
   "github.com/akavel/polyclip-go"
   "github.com/google/uuid"
   "go-space-serv/internal/space/snet/tcp"
@@ -30,28 +31,32 @@ func (p *WorldPlayer) Update(x, y uint16, worldMap *WorldMap) {
   // the player's view.
   // TODO: use player view range stat
   view := polyclip.Polygon{{
-    {doubleX - 32, doubleY - 32},
-    {doubleX + 32, doubleY - 32},
-    {doubleX + 32, doubleY + 32},
-    {doubleX - 32, doubleY + 32},
+    {doubleX - 128, doubleY - 128},
+    {doubleX + 128, doubleY - 128},
+    {doubleX + 128, doubleY + 128},
+    {doubleX - 128, doubleY + 128},
   }}
 
-  // clip view to world map bounds
+  // clamp view to world
   view = worldMap.Poly.Construct(polyclip.INTERSECTION, view)
-
-  // Get Contour(s) that exist in view but not in
-  // the explored polygon.
+  viewRect := view.BoundingBox()
+  viewRect = worldMap.ClampToChunks(viewRect)
+  view = polyclip.Polygon{{
+    {viewRect.Min.X, viewRect.Max.Y},
+    {viewRect.Min.X, viewRect.Min.Y},
+    {viewRect.Max.X, viewRect.Min.Y},
+    {viewRect.Max.X, viewRect.Max.Y},
+  }}
   unexplored := view.Construct(polyclip.DIFFERENCE, p.explored)
+  p.explored = p.explored.Construct(polyclip.UNION, unexplored)
 
-  // Clamp these contours to chunk size.
-  // Serialize the chunks and send to player.
-  blocksMsgs := worldMap.SerializeChunks(unexplored)
-  for _, m := range blocksMsgs {
-    msg := m
-    p.Tcp.Outgoing <- &msg
+  if unexplored.NumVertices() >= 4 {
+    blocksMsgs := worldMap.Explore(unexplored.BoundingBox())
+    for _, m := range blocksMsgs {
+      msg := m
+      p.Tcp.Outgoing <- &msg
+    }
   }
 
-  // Add unexplored to explored.
-  p.explored = p.explored.Construct(polyclip.UNION, view)
   return
 }
