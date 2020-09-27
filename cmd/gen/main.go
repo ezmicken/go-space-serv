@@ -17,7 +17,7 @@ import(
 func main() {
   flagCPF := flag.Uint("cpf", 512, "Chunks Per File")
   flagCSize := flag.Uint("csize", 128, "Chunk Size")
-  flagSize := flag.Uint("size", 512, "Map Size")
+  flagSize := flag.Uint("size", 256, "Map Size")
   flagSeed := flag.Uint64("seed", 209323094, "Seed for noise generation")
   flagThreshold := flag.Float64("threshold", 0.36, "Threshold for empty blocks")
   flagClean := flag.Bool("clean", false, "Clean but do not generate map.")
