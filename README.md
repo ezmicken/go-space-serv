@@ -8,6 +8,7 @@ A pair of servers built on [https://github.com/panjf2000/gnet](https://github.co
 ### Step One -- Generate Map Data
 
 osx: `./build/unix/gen assets/localMap`
+
 windows: `start build/win/gen.exe assets/localMap`
 
 How it works:
@@ -27,22 +28,30 @@ if it is solid or empty.
 
 ## Step Two: Start WORLD
 osx: `./build/unix/world`
+
 windows: `start build/win/world.exe`
+
 WORLD will load `assets/localMap/meta.chunks` and print it out.
+
 It will then wait for SIM to connect.
 
 ## Step Three: Start SIM
 osx: `./build/unix/sim`
+
 windows: `start build/win/sim.exe`
+
 SIM will connect via tcp to WORLD.
+
 WORLD will now begin accepting client connections.
 
 Both programs look for map data in `assets/localMap`
 
 When a client connects to WORLD, WORLD passes this information to SIM.
+
 SIM will now accept UDP packets from this IP.
 
 Clients will then perform a virtual connection sequence with SIM.
+
 Once SIM is satisfied it will synchronize this client with the simulation and allow input.
 
 The reliable ordered UDP protocol follows principles from these articles: [https://www.gafferongames.com/](https://www.gafferongames.com/)
