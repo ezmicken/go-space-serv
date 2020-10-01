@@ -25,8 +25,6 @@ type WorldMap struct {
   Poly polyclip.Polygon
 }
 
-var viewSize int = 16
-
 func NewWorldMap(name string) (*WorldMap, error) {
   metaFile, err := os.Open(fmt.Sprintf("assets/%s/meta.chunks", name))
   if err != nil {
