@@ -9,7 +9,7 @@ A pair of servers built on [https://github.com/panjf2000/gnet](https://github.co
 
 osx: `./build/unix/gen assets/localMap`
 
-windows: `start build/win/gen.exe assets/localMap`
+windows: `build/win/gen.exe assets/localMap`
 
 How it works:
 1) `GEN` generates a simplex noise profile.
@@ -29,7 +29,7 @@ if it is solid or empty.
 ## Step Two -- Start WORLD
 osx: `./build/unix/world`
 
-windows: `start build/win/world.exe`
+windows: `build/win/world.exe`
 
 WORLD will load `assets/localMap/meta.chunks` and print it out.
 
@@ -38,7 +38,7 @@ It will then wait for SIM to connect.
 ## Step Three -- Start SIM
 osx: `./build/unix/sim`
 
-windows: `start build/win/sim.exe`
+windows: `build/win/sim.exe`
 
 SIM will connect via tcp to WORLD.
 
