@@ -1,82 +1,84 @@
 package tcp
 
 import (
+  "time"
   "log"
-  "github.com/teris-io/shortid"
-  "github.com/akavel/polyclip-go"
+  "encoding/binary"
+  "github.com/google/uuid"
   "github.com/panjf2000/gnet"
-  "container/list"
-
-  "go-space-serv/internal/space/player"
 )
 
+type TCPPlayerState byte
+
+const (
+  DISCONNECTED TCPPlayerState = iota
+  AUTH
+  CONNECTED
+)
+
+const PacketSize int = 1024
+
 type TCPPlayer struct {
-  explored  polyclip.Polygon
-  msgQueue  *list.List
-  playerId  string
-  stats     *player.PlayerStats
-  c         gnet.Conn
+  Id              uuid.UUID
+  Outgoing  chan  TCPMsg
+
+  incoming  chan  TCPMsg
+  connection      gnet.Conn
+  factory         TCPMsgFactory
+  state           TCPPlayerState
 }
 
-var sid *shortid.Shortid
+func NewPlayer(conn gnet.Conn, id uuid.UUID, factory TCPMsgFactory) *TCPPlayer {
+  var p TCPPlayer
+  p.Outgoing = make(chan TCPMsg, 100)
+  p.incoming = make(chan TCPMsg, 100)
+  p.connection = conn
+  p.state = DISCONNECTED
+  p.Id = id
 
-func (p *TCPPlayer) Init(conn gnet.Conn) {
-  p.msgQueue = list.New()
+  return &p
+}
 
-  if sid == nil {
-    tempsid, err := shortid.New(0, shortid.DefaultABC, 447)
-    if err != nil {
-      panic(err)
+func (p *TCPPlayer) Connected() {
+  p.state = CONNECTED
+  go p.Tx()
+}
+
+func (p *TCPPlayer) Tx() {
+  packet := make([]byte, PacketSize)
+  head := 2
+  ticker := time.NewTicker(time.Duration(100) * time.Millisecond)
+  defer ticker.Stop()
+
+  for {
+    if p.state == DISCONNECTED {
+      log.Printf("disconnected")
+      break
     }
-    sid = tempsid
-  }
+    var m TCPMsg
+    select {
+    case m = <- p.Outgoing:
+      head = m.Serialize(packet, head)
+    }
 
-  id, err2 := sid.Generate()
-  if err2 != nil {
-    panic(err2)
-  }
+    if head > 2 {
+      toSend := packet
+      binary.LittleEndian.PutUint16(packet[0:2], uint16(head - 2))
+      p.connection.AsyncWrite(toSend[:head])
+      head = 2
+      packet = make([]byte, PacketSize)
+    }
 
-  p.playerId = id
-  log.Printf("generated playerId: %s", id)
-
-  p.stats = player.NewPlayerStats(); // TODO: get this from db
-  p.c = conn
-}
-
-func (p *TCPPlayer) NumMsgs() int {
-  return p.msgQueue.Len()
-}
-
-func (p *TCPPlayer) GetMsg() *NetworkMsg {
-  ele := p.msgQueue.Front()
-  p.msgQueue.Remove(ele)
-  return ele.Value.(*NetworkMsg)
-}
-
-func (p *TCPPlayer) AddMsgs(m []*NetworkMsg) {
-  for i := range m {
-    log.Printf("pushing %d", m[i].Size)
-    p.msgQueue.PushBack(m[i])
+    <- ticker.C
   }
 }
 
-func (p *TCPPlayer) AddMsg(m *NetworkMsg) {
-  log.Printf("pushing %d", m.Size)
-  p.msgQueue.PushBack(m)
-}
+func (p *TCPPlayer) Rx() {}
 
-func (p *TCPPlayer) GetPlayerId() string {
-  return p.playerId
-}
-
-func (p *TCPPlayer) GetPlayerStats() *player.PlayerStats {
-  return p.stats;
-}
-
-func (p *TCPPlayer) InitExploredPoly(xMin, xMax, yMin, yMax float64) {
-  p.explored = polyclip.Polygon{{{X: xMin, Y: yMin}, {X: xMax, Y: yMin}, {X: xMax, Y: yMax}, {X: xMax, Y: yMin}}}
+func (p *TCPPlayer) GetState() TCPPlayerState {
+  return p.state
 }
 
 func (p *TCPPlayer) GetConnection() gnet.Conn {
-  return p.c
+  return p.connection
 }

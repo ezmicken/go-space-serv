@@ -6,12 +6,12 @@ type PlayerStats struct {
   Rotation      float32
 }
 
-func NewPlayerStats() *PlayerStats{
+func DefaultPlayerStats() PlayerStats{
   var ps PlayerStats
 
   ps.Thrust = 12
   ps.MaxSpeed = 20
-  ps.Rotation = 172
+  ps.Rotation = 210
 
-  return &ps
+  return ps
 }

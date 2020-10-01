@@ -1,15 +1,16 @@
-package phys
+package sim
 
 import(
-  "go-space-serv/internal/space/phys/msg"
+  "github.com/google/uuid"
+  "go-space-serv/internal/space/sim/msg"
   "go-space-serv/internal/space/snet/udp"
 )
 
 // TODO: pooling
-type MsgFactory struct {}
+type SimMsgFactory struct {}
 
 // Create msg, deserialize it, publish it, return new head
-func (mf *MsgFactory) CreateAndPublishMsg(packet []byte, head int, target chan udp.UDPMsg, playerId string) int {
+func (mf *SimMsgFactory) CreateAndPublishMsg(packet []byte, head int, target chan udp.UDPMsg, playerId uuid.UUID) int {
   cmd := udp.UDPCmd(packet[head])
   if cmd == udp.SYNC {
     m := &msg.CmdMsg{}

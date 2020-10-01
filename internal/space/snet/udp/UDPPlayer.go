@@ -8,8 +8,8 @@ import (
   "encoding/binary"
 
   "github.com/panjf2000/gnet"
+  "github.com/google/uuid"
 
-  "go-space-serv/internal/space/player"
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/util"
 )
@@ -34,16 +34,25 @@ type PacketData struct {
 }
 
 type UDPPlayer struct {
+  Id                uuid.UUID
+  Outgoing    chan  UDPMsg
+
+  incoming    chan  UDPMsg
+  state             UDPPlayerState
+  connection        gnet.Conn
+  msgFactory        UDPMsgFactory
+
   spamChan          chan struct{}
-  name              string
   active            bool
   lastSync          int64
 
   // packet stuff
   clientSalt        int64
   serverSalt        int64
+
   seqBuffer         []uint32
   packetData        []PacketData
+
   txSeq             uint16
   txAck             uint16
   rxSeq             uint16
@@ -54,18 +63,10 @@ type UDPPlayer struct {
   packetBuffer      []byte
   packetBufferTail  int
   packetBufferEmpty bool
-
-  connection        gnet.Conn
-  msgFactory        UDPMsgFactory
-  toSim             chan UDPMsg
-  toClient          chan UDPMsg
-  state             UDPPlayerState
-  stats             *player.PlayerStats
 }
 
-func NewUdpPlayer(n string) *UDPPlayer {
+func NewPlayer(in chan UDPMsg, id uuid.UUID, factory UDPMsgFactory) *UDPPlayer {
   var p UDPPlayer
-  p.name = n
   p.active = false
   p.state = DISCONNECTED
   p.lastSync = 0
@@ -78,7 +79,10 @@ func NewUdpPlayer(n string) *UDPPlayer {
   p.shutupRx = 0
   p.shutupTx = 0
 
-  p.toClient = make(chan UDPMsg, 100)
+  p.incoming = in
+  p.Outgoing = make(chan UDPMsg, 100)
+  p.Id = id
+  p.msgFactory = factory
 
   p.seqBuffer = make([]uint32, BUFFER_SIZE)
   p.packetData = make([]PacketData, BUFFER_SIZE)
@@ -115,7 +119,7 @@ func (p *UDPPlayer) onPacketAcked(seq uint16) {
 func (p *UDPPlayer) getMsg() UDPMsg {
   var tmp UDPMsg
   select {
-  case tmp = <-p.toClient:
+  case tmp = <-p.Outgoing:
   default:
     return nil
   }
@@ -128,6 +132,9 @@ func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
   if p.spamChan != nil {
     close(p.spamChan)
   }
+
+  ticker := time.NewTicker(time.Duration(rate) * time.Millisecond)
+  defer ticker.Stop()
 
   log.Printf("sending first %d", msg[4])
   p.connection.SendTo(msg)
@@ -147,7 +154,7 @@ func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
 
       log.Printf("sending %d (iteration %d)", msg[4], i)
       p.connection.SendTo(msg)
-      time.Sleep(time.Duration(rate) * time.Millisecond)
+      <- ticker.C
     }
 
     log.Printf("Player.sendRepeating finished all iterations.")
@@ -155,7 +162,7 @@ func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
   }()
 }
 
-func (p *UDPPlayer) unpack(packet []byte) {
+func (p *UDPPlayer) Unpack(packet []byte) {
   head := 8
   tail := 0
   salt := snet.Read_int64(packet[tail:head])
@@ -192,14 +199,15 @@ func (p *UDPPlayer) unpack(packet []byte) {
       p.rxSeq = seq
 
       for head < msgLen {
-        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.toSim, p.name)
+        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.incoming, p.Id)
       }
     }
   }
 }
 
 func (p *UDPPlayer) PackAndSend() {
-  numMsgs := len(p.toClient)
+  numMsgs := len(p.Outgoing)
+
   shouldStop := numMsgs == 0
   shouldStop = shouldStop && p.txSeq == p.txAck
   shouldStop = shouldStop && p.shutupTx > SHUTUP_TIME
@@ -249,8 +257,8 @@ func (p *UDPPlayer) PackAndSend() {
     msg := tmp.(UDPMsg)
     msgSize := msg.GetSize()
     if p.packetBufferTail + msgSize >= int(BUFFER_SIZE) {
-      p.toClient <- msg
-      log.Printf("%s packetBuffer overflow.", p.name)
+      p.Outgoing <- msg
+      log.Printf("%v packetBuffer overflow.", p.Id)
     }
 
     if !p.packetBufferEmpty {
@@ -277,13 +285,14 @@ func (p *UDPPlayer) PackAndSend() {
   p.connection.SendTo(p.packetBuffer[:p.packetBufferTail])
 }
 
-func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
+// TODO: add sequence to this
+func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn) bool {
   // Respond to HELLO with CHALLENGE
   if p.state == DISCONNECTED {
     // enforce padding to avoid participating in DDoS minification
     if len(bytes) != helpers.GetConfig().MAX_MSG_SIZE {
       log.Printf("Rejecting packet due to lack of padding.")
-      return
+      return false
     }
 
     cmd := UDPCmd(bytes[4])
@@ -302,114 +311,42 @@ func (p *UDPPlayer) PacketReceive(bytes []byte, conn gnet.Conn) {
       p.state = CHALLENGED
     }
 
-    return
+    return false
   }
+
   if p.state == CHALLENGED {
     // enforce padding to avoid participating in DDoS minification
     if len(bytes) != helpers.GetConfig().MAX_MSG_SIZE {
       log.Printf("Rejecting packet due to lack of padding.")
-      return
+      return false
     }
 
     cmd := UDPCmd(bytes[4])
     if cmd == CHALLENGE {
-      log.Printf("Received CHALLENGE");
       challengeResponse := snet.Read_int64(bytes[5:13])
       if challengeResponse == p.clientSalt ^ p.serverSalt {
         p.state = CONNECTED
-        log.Printf("%s is welcome.", p.name)
+        log.Printf("%v is welcome.", p.Id)
         msgBytes := make([]byte, 13)
         binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
         msgBytes[4] = byte(WELCOME)
         binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(p.clientSalt ^ p.serverSalt))
         p.sendRepeating(msgBytes, 500, 20)
         p.state = SPECTATING
-      } else {
-        log.Printf("%s failed challenge with %d", p.clientSalt ^ p.serverSalt)
+        return true
       }
     }
 
-    return
+    return false
   }
 
-  // state == CONNECTED
-  p.unpack(bytes[4:])
-  return;
-}
-
-func (p *UDPPlayer) AddMsg(m UDPMsg) {
-  select {
-  case p.toClient <- m:
-  default:
-    log.Printf("%s msg queue full. Discarding...", p.name)
-  }
-}
-
-func (p *UDPPlayer) SetSimChan(ch chan UDPMsg) {
-  p.toSim = ch
-}
-
-func (p *UDPPlayer) SetMsgFactory(factory UDPMsgFactory) {
-  p.msgFactory = factory
-}
-
-func (p *UDPPlayer) GetName() string {
-  return p.name
-}
-
-func (p *UDPPlayer) Activate() {
-  p.active = true
-}
-
-func (p *UDPPlayer) Deactivate() {
-  p.active = false
-}
-
-func (p *UDPPlayer) IsActive() bool {
-  return p.active
+  return false
 }
 
 func (p *UDPPlayer) SetState(s UDPPlayerState) {
   p.state = s
 }
 
-func (p *UDPPlayer) SetStats(s *player.PlayerStats) {
-  p.stats = s
-}
-
-func (p *UDPPlayer) GetStats() *player.PlayerStats {
-  return p.stats
-}
-
 func (p *UDPPlayer) GetState() UDPPlayerState {
   return p.state
-}
-
-func (p *UDPPlayer) SetConnection(c gnet.Conn) {
-  p.connection = c
-}
-
-func (p *UDPPlayer) SetClientSalt(salt int64) {
-  p.clientSalt = salt
-}
-func (p *UDPPlayer) GetClientSalt() int64 {
-  return p.clientSalt
-}
-func (p *UDPPlayer) SetServerSalt(salt int64) {
-  p.serverSalt = salt
-}
-func (p *UDPPlayer) GetServerSalt() int64 {
-  return p.serverSalt
-}
-
-func (p *UDPPlayer) GetConnection() gnet.Conn {
-  return p.connection
-}
-
-func (p *UDPPlayer) Sync(time int64) {
-  p.lastSync = time
-}
-
-func (p *UDPPlayer) GetLastSync() int64 {
-  return p.lastSync
 }

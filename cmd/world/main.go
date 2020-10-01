@@ -5,17 +5,10 @@ import (
   "sync"
   "time"
   "net"
-  "context"
-  "os"
-  "os/signal"
 
   "github.com/panjf2000/gnet"
   "github.com/panjf2000/gnet/pool/goroutine"
-
-  //"github.com/akavel/polyclip-go"
-
-  // integer math
-  //"github.com/bxcodec/saint"
+  "github.com/google/uuid"
 
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/snet"
@@ -27,181 +20,111 @@ type worldServer struct {
 
   pool              *goroutine.Pool
   tick              time.Duration
-  players           sync.Map
   state             snet.ServerState
+
   physics           gnet.Conn
   physicsIP         net.IP
-  physicsPort       int
-  worldMap          *world.WorldMap
+  physicsPort       uint32
+
+  wld               *world.World
+  players           *world.WorldPlayers
+  msgFactory        world.WorldMsgFactory
+  addrToId          sync.Map
 
   // lifecycle
-  ctx               context.Context
-  lifeWG            sync.WaitGroup
   life        chan  struct{}
-  cancel            func()
-  physicsOpen       bool
+  shutdown    chan  struct{}
 }
 
-// protocol constants
-// message structure is as follows:
-// [ length, command, content ]
-//     4b       1b    <= 4091b
-const prefixLen int = 4
-const cmdLen int = 1
-const blockLen int = 9
-const maxMsgSize int = 4096
-const maxBlocksPerMsg = (maxMsgSize - prefixLen - cmdLen) / blockLen
+const maxMsgSize int = 1024
 
-var spawnX int = 500;
-var spawnY int = 500;
-var viewSize = 50; // todo: make this a player stat
+var spawnX int = 1600;
+var spawnY int = 0;
 
-func (ws *worldServer) getPlayer(ip string) *tcp.TCPPlayer{
-  plr, ok := ws.players.Load(ip)
-  if ok && plr != nil {
-    return plr.(*tcp.TCPPlayer)
+func main() {
+  var plrs world.WorldPlayers
+  plrs.Count = 0
+
+  w, err := world.NewWorld(&plrs, "localMap")
+  if err != nil {
+    panic(err)
+  }
+  p := goroutine.Default()
+  defer p.Release()
+
+  ws := &worldServer{
+    wld: w,
+    pool: p,
+    tick: 100000000,
+    state: snet.WAIT_PHYS,
+    players: &plrs,
+    life: make(chan struct{}),
+    shutdown: make(chan struct{}),
   }
 
-  return nil
+  go ws.live()
+  <-ws.life
+
+  log.Printf("end")
 }
 
-func (ws *worldServer) propagateMsg(playerId string, msg *tcp.NetworkMsg) {
-  ws.players.Range(func(key, value interface{}) bool {
-    plr := value.(*tcp.TCPPlayer)
+func (ws *worldServer) live() {
+  defer close(ws.life)
 
-    if plr.GetPlayerId() != playerId {
-      plr.AddMsg(msg);
+  go func() {
+    log.Printf("Awaiting simulation...")
+    err := gnet.Serve(ws, "tcp://:9494", gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
+    if err != nil {
+      log.Fatal(err)
     }
+  }()
 
-    return true
-  })
+  <-ws.shutdown
 }
 
 func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
-  var plr tcp.TCPPlayer
-  plr.Init(c)
-  playerId := plr.GetPlayerId()
+  // TODO: auth
+  // TODO: get this from db via auth token
+  id := uuid.New()
+  tcpPlr := tcp.NewPlayer(c, id, &ws.msgFactory)
+  plr := ws.players.Add(tcpPlr)
 
-  // Let other clients know
-  joinMsg := new(tcp.NetworkMsg)
-  joinMsg.PutByte(byte(snet.SPlayerJoin))
-  joinMsg.PutString(playerId)
-  stats := plr.GetPlayerStats()
-  joinMsg.PutFloat32(stats.Thrust)
-  joinMsg.PutFloat32(stats.MaxSpeed)
-  joinMsg.PutFloat32(stats.Rotation)
-  ws.propagateMsg(playerId, joinMsg)
+  addr := c.RemoteAddr().(*net.TCPAddr).IP
+  ws.addrToId.Store(addr.String(), id)
 
-  // Let this client know about connected players
-  ws.players.Range(func(key, value interface{}) bool {
-    p := value.(*tcp.TCPPlayer)
+  ws.wld.PlayerJoin(plr, ws.physicsIP, ws.physicsPort)
 
-    if p.GetPlayerId() != playerId {
-      connectedMsg := new(tcp.NetworkMsg)
-      connectedMsg.PutByte(byte(snet.SPlayerJoin))
-      connectedMsg.PutString(p.GetPlayerId())
-      stats = p.GetPlayerStats()
-      connectedMsg.PutFloat32(stats.Thrust)
-      connectedMsg.PutFloat32(stats.MaxSpeed)
-      connectedMsg.PutFloat32(stats.Rotation)
-      plr.AddMsg(connectedMsg)
-    }
+  // Tell the physics server about this client
+  packet := []byte{byte(snet.IJoin)}
+  packet = append(packet, id[0:]...)
+  packet = append(packet, byte(len(addr)))
+  packet = append(packet, addr...)
+  ws.physics.AsyncWrite(packet)
 
-    return true
-  })
-
-  // Let this client know their player stats
-  statsMsg := new(tcp.NetworkMsg)
-  statsMsg.PutByte(byte(snet.SPlayerStats))
-  statsMsg.PutString(plr.GetPlayerId())
-  statsMsg.PutFloat32(stats.Thrust)
-  statsMsg.PutFloat32(stats.MaxSpeed)
-  statsMsg.PutFloat32(stats.Rotation)
-  plr.AddMsg(statsMsg);
-
-  // queue world data msg
-  worldInfoNetworkMsg := ws.worldMap.SerializeInfo()
-  plr.AddMsg(worldInfoNetworkMsg)
-
-  // gather info about surrounding blocks and queue msgs
-  blocks := ws.worldMap.GetBlocksAroundPoint(spawnX, spawnY)
-  plr.InitExploredPoly(float64(spawnX - viewSize), float64(spawnX + viewSize), float64(spawnY - viewSize), float64(spawnY + viewSize))
-
-  blocksLen := len(blocks)
-  blocksMsgs := []*tcp.NetworkMsg{}
-  currentMsg := new(tcp.NetworkMsg)
-  currentMsg.PutByte(byte(snet.SBlocks));
-  for i, j := 0, 0; i < blocksLen; i++ {
-    if j >= maxBlocksPerMsg {
-      blocksMsgs = append(blocksMsgs, currentMsg)
-      currentMsg = new(tcp.NetworkMsg)
-      currentMsg.PutByte(byte(snet.SBlocks))
-      j = 0
-    }
-    currentMsg.PutBytes(blocks[i].Serialize())
-    j++
-  }
-
-  plr.AddMsgs(blocksMsgs)
-
-  ws.players.Store(c.RemoteAddr().String(), &plr)
-
-  // notify physics server
-  var physMsg tcp.NetworkMsg
-  physMsg.PutByte(byte(snet.IJoin))
-  physMsg.PutString(plr.GetPlayerId())
-  physMsg.PutString(c.RemoteAddr().(*net.TCPAddr).IP.String());
-  log.Printf("Sending connection event to physics");
-  ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
-
-  // send physics connection details to this client
-  var physConnectionMsg tcp.NetworkMsg
-  physConnectionMsg.PutByte(byte(snet.SConnectionInfo))
-  physConnectionMsg.PutBytes(ws.physicsIP)
-  physConnectionMsg.PutUint32(ws.physicsPort)
-  physConnectionMsg.PutString(plr.GetPlayerId())
-  plr.AddMsg(&physConnectionMsg)
+  plr.Tcp.Connected()
 
   return
 }
 
 func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
-  plr := ws.getPlayer(c.RemoteAddr().String())
-  if plr != nil {
-    disconnectedPlayerId := plr.GetPlayerId()
+  id, ok := ws.addrToId.Load(c.RemoteAddr().(*net.TCPAddr).IP.String())
+  if ok {
+    playerId := id.(uuid.UUID)
 
-    var physMsg tcp.NetworkMsg
-    physMsg.PutByte(byte(snet.ILeave))
-    physMsg.PutString(plr.GetPlayerId())
-    log.Printf("Sending disconnection event to physics");
-    ws.physics.AsyncWrite(snet.GetDataFromNetworkMsg(&physMsg))
+    ws.wld.PlayerLeave(playerId)
 
-    // Let other clients know about this event
-    ws.players.Range(func(key, value interface{}) bool {
-      plr := value.(*tcp.TCPPlayer)
-      if plr.GetPlayerId() != disconnectedPlayerId {
-        disconnectedMsg := new(tcp.NetworkMsg)
-        disconnectedMsg.PutByte(byte(snet.SPlayerLeave))
-        disconnectedMsg.PutString(disconnectedPlayerId)
-        plr.AddMsg(disconnectedMsg)
-      }
-
-      return true
-    })
+    // Tell physics about this
+    packet := []byte{byte(snet.ILeave)}
+    packet = append(packet, playerId[0:]...)
+    ws.physics.AsyncWrite(packet)
   }
 }
 
 func (ws *worldServer) initPhysicsConnection(c gnet.Conn) (out []byte) {
   ws.physics = c
-  ws.physicsOpen = true
   ws.physicsIP = snet.GetOutboundIP()
   ws.state = snet.SETUP
-  log.Printf("Physics server connected.")
-
-  // send physics server the map details
-  msg := ws.worldMap.Serialize()
-  out = snet.GetDataFromNetworkMsg(msg)
-  log.Printf("Sending world map (%d) to physics server...", len(out))
+  log.Printf("Physics server connected, sending blocks.")
 
   return
 }
@@ -243,87 +166,42 @@ func (ws *worldServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 
   if !isPhysicsConnection(c) {
     ws.closePlayerConnection(c);
-  } else {
-    ws.physicsOpen = false
   }
-
-  ws.players.Delete(c.RemoteAddr().String())
 
   return
 }
 
 func (ws *worldServer) React(data []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-  //data := append([]byte{}, c.Read()...)
+  bytes := append([]byte{}, data...)
+  c.ResetBuffer()
   if isPhysicsConnection(c) {
-    _ = ws.pool.Submit(func() {
-      if ws.state == snet.SETUP && len(data) >= 4 {
-        if (len(data) >= 4) {
-          msg := snet.GetNetworkMsgFromData(data)
-          if msg != nil {
-            c.ResetBuffer()
-            if msg.Data[0] == byte(snet.IReady) {
-              ws.physicsPort = snet.Read_int32(msg.Data[1:])
-              ws.state = snet.ALIVE
-              log.Printf("Accepting player connections...")
-            }
-          }
-        }
-      }
-    })
-  } else {
-    _ = ws.pool.Submit(func() {
-      if len(data) >= 4 {
-        msg := snet.GetNetworkMsgFromData(data)
-        if msg != nil {
-          responseMsg := interpret(*msg, c)
-          c.ResetBuffer();
-
-          if responseMsg != nil {
-            response := snet.GetDataFromNetworkMsg(responseMsg)
-            if response != nil {
-              log.Printf("[%s] React <- %d", c.RemoteAddr().String(), responseMsg.Size)
-              c.AsyncWrite(responseMsg.SizeBytes())
-              c.AsyncWrite(responseMsg.Data)
-            }
-          }
-        }
-      }
-    })
+    if ws.state == snet.SETUP && len(bytes) >= 5 && bytes[0] == byte(snet.IReady) {
+      ws.physicsPort = snet.Read_uint32(bytes[1:])
+      log.Printf("Accepting player connections...")
+      ws.state = snet.ALIVE
+    } else {
+      _ = ws.pool.Submit(func() {
+        ws.wld.InterpretPhysics(bytes)
+      })
+    }
   }
 
   return
 }
 
 func (ws *worldServer) OnShutdown(s gnet.Server) {
-  ws.lifeWG.Done()
+  ws.state = snet.DEAD
+  close(ws.shutdown)
 }
 
 func (ws *worldServer) Tick() (delay time.Duration, action gnet.Action) {
   delay = ws.tick
 
-  if ws.state == snet.ALIVE {
-    ws.players.Range(func(key, value interface{}) bool {
-      addr := key.(string)
-      plr := value.(*tcp.TCPPlayer)
-      c := plr.GetConnection()
-
-      numMsgs := plr.NumMsgs()
-      if numMsgs > 0 {
-        netMsg := plr.GetMsg();
-        log.Printf("[%s] Tick <- %d", addr, netMsg.Size)
-        c.AsyncWrite(netMsg.SizeBytes())
-        c.AsyncWrite(netMsg.Data)
-      }
-      return true
-    })
+  if ws.state == snet.SHUTDOWN {
+    action = gnet.Shutdown
   }
 
   return
-}
-
-func interpret(msg tcp.NetworkMsg, c gnet.Conn) (*tcp.NetworkMsg){
-  log.Printf("[%s] -> %d", c.RemoteAddr().String(), msg.Size)
-  return world.HandleCmd(msg.Data)
 }
 
 // TODO: find some real way to validate this.
@@ -332,62 +210,4 @@ func isPhysicsConnection(c gnet.Conn) bool {
   return tcpAddr.Port == 9499
 }
 
-func main() {
-  log.Printf("Generating worldMap...")
-  var wm world.WorldMap
-  wm.W = 1000
-  wm.H = 1000
-  wm.Resolution = 32
-  wm.Seed = 209323094
-  wm.Generate()
-  log.Printf("worldMap generated.")
 
-  p := goroutine.Default()
-  defer p.Release()
-
-  ws := &worldServer{
-    pool: p,
-    tick: 100000000,
-    state: snet.WAIT_PHYS,
-    worldMap: &wm,
-  }
-
-  ws.ctx, ws.cancel = context.WithCancel(context.Background())
-  ws.life = make(chan struct{})
-  go ws.sig()
-  go ws.live()
-
-  <-ws.ctx.Done()
-  log.Printf("Shutting down...")
-  ws.lifeWG.Add(1)
-  ws.state = snet.SHUTDOWN
-  <-ws.life
-
-  log.Printf("end")
-}
-
-func (ws *worldServer) live() {
-  ws.lifeWG.Add(1)
-  go func() {
-    err := gnet.Serve(ws, "tcp://:9494", gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
-    if err != nil {
-      log.Fatal(err)
-    }
-    log.Printf("server finish")
-    ws.lifeWG.Done()
-  }()
-
-  ws.lifeWG.Wait()
-  ws.state = snet.DEAD
-  ws.cancel()
-  close(ws.life)
-}
-
-func (ws *worldServer) sig() {
-  signalChan := make(chan os.Signal, 1)
-  signal.Notify(signalChan, os.Interrupt)
-
-  oscall := <-signalChan
-  log.Printf("system call: %+v", oscall)
-  ws.cancel()
-}

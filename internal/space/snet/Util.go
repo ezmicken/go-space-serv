@@ -7,16 +7,18 @@ import(
   "log"
   "strings"
   "net"
-
-  "go-space-serv/internal/space/snet/tcp"
+  "sync"
 )
 
 const PrefixLength int = 4
 
 // auto-incrementing id
 var nextId uint16 = 0
+var idLock sync.Mutex
 func GetNextId() uint16 {
+  idLock.Lock()
   nextId += 1
+  idLock.Unlock()
   return nextId
 }
 
@@ -70,36 +72,4 @@ func Read_utf8(data []byte) string {
   }
 
   return utf8Name.String()
-}
-
-// Gets the whole message from the stream
-func GetNetworkMsgFromData(data [] byte) (*tcp.NetworkMsg) {
-  dataLen := len(data)
-  if dataLen >= PrefixLength {
-    msgLen := Read_int32(data[:4])
-    if dataLen - PrefixLength == msgLen {
-      msgData := data[4:]
-      return &tcp.NetworkMsg{Size: msgLen, Data: msgData}
-    }
-  }
-
-  return nil
-}
-
-func GetDataFromNetworkMsg(msg *tcp.NetworkMsg) (out []byte) {
-  // size
-  sizeBuf := new(bytes.Buffer)
-  err := binary.Write(sizeBuf, binary.LittleEndian, int32(msg.Size))
-  if err != nil {
-    log.Printf("Unable to convert msg size to byte. err = %s", err)
-    return nil
-  }
-  out = append([]byte{}, sizeBuf.Bytes()...)
-
-  // content
-  if msg.Data != nil {
-    out = append(out, msg.Data...)
-  }
-
-  return
 }

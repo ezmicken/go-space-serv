@@ -4,18 +4,18 @@ import (
   "time"
 )
 
-func PerSecondOverTime(stat float32, dur ...int64) float32 {
-  if len(dur) > 1 {
-    return stat * float32(dur[1] - dur[0]) / float32(1000)
-  } else {
-    return stat * (float32(dur[0]) / float32(1000))
-  }
+func PerSecondOverTime(stat float32, dur int64) float32 {
+  return stat * (float32(dur) / float32(1000))
 }
 
 func WrapFloat32(val, min, length float32) float32 {
   for val >= length { val -= length }
   for val < min { val += length }
   return val;
+}
+
+func WrapAngle(val float32) float32 {
+  return WrapFloat32(val, 0, 360)
 }
 
 func WrapInt(val, min, length int) int {
@@ -60,4 +60,31 @@ func BitString(bytes []byte) string {
   dbg += "]"
 
   return dbg
+}
+
+// Thanks Craig McQueen
+// https://stackoverflow.com/questions/1100090/looking-for-an-efficient-integer-square-root-algorithm-for-arm-thumb2
+func Sqrt_uint32(op uint32) uint32 {
+  res := uint32(0)
+  one64 := uint64(1)
+  one := uint32(one64 << 30)
+
+  for one > op {
+    one >>= 2
+  }
+
+  for one != 0 {
+    if op >= res + one {
+      op = op - (res + one)
+      res = res + 2 * one
+    }
+    res >>= 1
+    one >>= 2
+  }
+
+  if op > res {
+    res++
+  }
+
+  return res
 }
