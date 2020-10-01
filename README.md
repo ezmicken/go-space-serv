@@ -7,8 +7,8 @@ A pair of servers built on [https://github.com/panjf2000/gnet](https://github.co
 |GEN|creates map data.
 ### Step One -- Generate Map Data
 
-osx: `./gen assets/localMap`
-windows: `start gen.exe assets/localMap`
+osx: `./build/unix/gen assets/localMap`
+windows: `start build/win/gen.exe assets/localMap`
 
 How it works:
 1) `GEN` generates a simplex noise profile.
@@ -26,14 +26,14 @@ if it is solid or empty.
 |clean|false|Clean without generating the map.|
 
 ## Step Two: Start WORLD
-osx: `./world`
-windows: `start world.exe`
+osx: `./build/unix/world`
+windows: `start build/win/world.exe`
 WORLD will load `assets/localMap/meta.chunks` and print it out.
 It will then wait for SIM to connect.
 
 ## Step Three: Start SIM
-osx: `./sim`
-windows: `start sim.exe`
+osx: `./build/unix/sim`
+windows: `start build/win/sim.exe`
 SIM will connect via tcp to WORLD.
 WORLD will now begin accepting client connections.
 
