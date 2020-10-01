@@ -26,7 +26,7 @@ if it is solid or empty.
 |**threshold**|0.36|Threshold value for solid/empty.|
 |clean|false|Clean without generating the map.|
 
-## Step Two: Start WORLD
+## Step Two -- Start WORLD
 osx: `./build/unix/world`
 
 windows: `start build/win/world.exe`
@@ -35,7 +35,7 @@ WORLD will load `assets/localMap/meta.chunks` and print it out.
 
 It will then wait for SIM to connect.
 
-## Step Three: Start SIM
+## Step Three -- Start SIM
 osx: `./build/unix/sim`
 
 windows: `start build/win/sim.exe`
