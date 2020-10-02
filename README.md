@@ -68,3 +68,7 @@ Clients will then perform a virtual connection sequence with SIM.
 Once SIM is satisfied it will synchronize this client with the simulation and allow input.
 
 The reliable ordered UDP protocol follows principles from these articles: [https://www.gafferongames.com/](https://www.gafferongames.com/)
+
+
+## Shutdown
+Shut down both servers by terminating the WORLD process.
