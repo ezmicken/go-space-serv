@@ -66,9 +66,15 @@ type physicsServer struct {
   toWorld       chan  []byte
 }
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 
 func main() {
+  cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
+  flagTimestep := flag.Int64("timestep", 33, "physics timestep in milliseconds")
+  flagTimestepNano := flag.Int64("timestepNano", 33000000, "physics timestep in nanoseconds")
+  flagProtocolId := flag.Uint("protocolId", 3551548956, "value must match client")
+  flagWorldRate := flag.Int("worldRate", 12, "physics frames passing before sending state update to world.")
+
   p := goroutine.Default()
   defer p.Release()
 
@@ -88,13 +94,13 @@ func main() {
   // Populate config
   // TODO: take this from flags
   var config helpers.Config
-  config.TIMESTEP = 33
-  config.TIMESTEP_NANO = 33000000
+  config.TIMESTEP = *flagTimestep
+  config.TIMESTEP_NANO = *flagTimestepNano
   config.NAME = "SPACE-PHYS"
   config.VERSION = "0.0.1"
-  config.PROTOCOL_ID = SDBMHash(config.NAME + config.VERSION)
+  config.PROTOCOL_ID = uint32(*flagProtocolId)
   config.MAX_MSG_SIZE = 1024
-  config.WORLD_RATE = 12
+  config.WORLD_RATE = *flagWorldRate
   helpers.SetConfig(&config)
 
   log.Printf("PROTOCOL_ID: %d", config.PROTOCOL_ID)
