@@ -2,6 +2,8 @@ package main
 
 import (
   "log"
+  "fmt"
+  "flag"
   "sync"
   "time"
   "net"
@@ -42,10 +44,18 @@ var spawnX int = 1600;
 var spawnY int = 0;
 
 func main() {
+  flagPort := flag.Uint("port", 9494, "Port to listen on")
+
+  flag.Parse()
+
+  mapName := flag.Arg(0)
+
+  if mapName == "" { mapName = "localMap" }
+
   var plrs world.WorldPlayers
   plrs.Count = 0
 
-  w, err := world.NewWorld(&plrs, "localMap")
+  w, err := world.NewWorld(&plrs, mapName)
   if err != nil {
     panic(err)
   }
@@ -62,18 +72,19 @@ func main() {
     shutdown: make(chan struct{}),
   }
 
-  go ws.live()
+  go ws.live(*flagPort)
   <-ws.life
 
   log.Printf("end")
 }
 
-func (ws *worldServer) live() {
+func (ws *worldServer) live(port uint) {
   defer close(ws.life)
 
   go func() {
     log.Printf("Awaiting simulation...")
-    err := gnet.Serve(ws, "tcp://:9494", gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
+    addr := fmt.Sprintf("tcp://:%d", port);
+    err := gnet.Serve(ws, addr, gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithReusePort(true))
     if err != nil {
       log.Fatal(err)
     }
