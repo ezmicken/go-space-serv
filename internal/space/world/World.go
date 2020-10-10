@@ -29,6 +29,10 @@ func NewWorld(wp *WorldPlayers, mapName string) (*World, error) {
 }
 
 func (w *World) PlayerJoin(plr *WorldPlayer, physIp net.IP, physPort uint32) {
+  // Tell this client about the world
+  worldInfoMsg := w.worldMap.GetWorldInfoMsg()
+  plr.Tcp.Outgoing <- &worldInfoMsg
+
   // Tell this client his stats
   var playerInfoMsg msg.PlayerInfoMsg
   playerInfoMsg.Id = plr.Tcp.Id
@@ -36,10 +40,6 @@ func (w *World) PlayerJoin(plr *WorldPlayer, physIp net.IP, physPort uint32) {
   playerInfoMsg.X = plr.X
   playerInfoMsg.Y = plr.Y
   plr.Tcp.Outgoing <- &playerInfoMsg
-
-  // Tell this client about the world
-  worldInfoMsg := w.worldMap.GetWorldInfoMsg()
-  plr.Tcp.Outgoing <- &worldInfoMsg
 
   // Tell this client about the physics server
   var simInfoMsg msg.SimInfoMsg
