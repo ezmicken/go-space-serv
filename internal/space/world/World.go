@@ -33,6 +33,8 @@ func (w *World) PlayerJoin(plr *WorldPlayer, physIp net.IP, physPort uint32) {
   var playerInfoMsg msg.PlayerInfoMsg
   playerInfoMsg.Id = plr.Tcp.Id
   playerInfoMsg.Stats = plr.Stats
+  playerInfoMsg.X = plr.X
+  playerInfoMsg.Y = plr.Y
   plr.Tcp.Outgoing <- &playerInfoMsg
 
   // Tell this client about the world
@@ -44,6 +46,8 @@ func (w *World) PlayerJoin(plr *WorldPlayer, physIp net.IP, physPort uint32) {
   simInfoMsg.Ip = physIp
   simInfoMsg.Port = physPort
   plr.Tcp.Outgoing <- &simInfoMsg
+
+  plr.Update(plr.X, plr.Y, w.worldMap)
 }
 
 func (w *World) PlayerLeave(id uuid.UUID) {

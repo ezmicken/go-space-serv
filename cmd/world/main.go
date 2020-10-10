@@ -40,8 +40,8 @@ type worldServer struct {
 
 const maxMsgSize int = 1024
 
-var spawnX int = 1600;
-var spawnY int = 0;
+var spawnX uint16 = 1600;
+var spawnY uint16 = 0;
 
 func main() {
   flagPort := flag.Uint("port", 9494, "Port to listen on")
@@ -99,6 +99,8 @@ func (ws *worldServer) initPlayerConnection(c gnet.Conn) {
   id := uuid.New()
   tcpPlr := tcp.NewPlayer(c, id, &ws.msgFactory)
   plr := ws.players.Add(tcpPlr)
+  plr.X = spawnX
+  plr.Y = spawnY
 
   addr := c.RemoteAddr().(*net.TCPAddr).IP
   ws.addrToId.Store(addr.String(), id)
