@@ -40,8 +40,8 @@ type worldServer struct {
 
 const maxMsgSize int = 1024
 
-var spawnX uint16 = 1600;
-var spawnY uint16 = 0;
+var spawnX uint16 = 64;
+var spawnY uint16 = 64;
 
 func main() {
   flagPort := flag.Uint("port", 9494, "Port to listen on")

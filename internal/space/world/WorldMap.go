@@ -14,8 +14,8 @@ import (
 
 // TODO: move to worldinfo
 const RESOLUTION float32 = 32
-const SPAWNX uint32 = 1600
-const SPAWNY uint32 = 0
+const SPAWNX uint32 = 64
+const SPAWNY uint32 = 64
 
 type WorldMap struct {
   info WorldInfo
