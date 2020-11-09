@@ -30,7 +30,7 @@ func (msg *EnterMsg) Serialize(bytes []byte) {
   return
 }
 func (msg *EnterMsg) GetSize() int {
-  return 26
+  return 27
 }
 
 func (msg *EnterMsg) Deserialize(bytes []byte, head int) int { return head }
