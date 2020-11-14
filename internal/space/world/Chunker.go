@@ -40,9 +40,15 @@ func (c *Chunker) GetChunk(chunkId, fileId uint16) []byte {
   chunkEnd := chunkStart + c.info.BlocksPerChunk
   chunkSlice := file[chunkStart:chunkEnd]
 
+  return chunkSlice
+}
+
+func (c *Chunker) GetZippedChunk(chunkId, fileId uint16) []byte {
+  unzipped := c.GetChunk(chunkId, fileId)
+
   var buf bytes.Buffer
   c.writer.Reset(&buf)
-  c.writer.Write(chunkSlice)
+  c.writer.Write(unzipped)
   c.writer.Close()
 
   return buf.Bytes()
