@@ -60,7 +60,7 @@ type physicsServer struct {
   worldLaddr          *net.TCPAddr
   worldRaddr          *net.TCPAddr
   worldConnOpen       bool
-  worldMap            world.WorldMap
+  worldMap            *world.WorldMap
   worldMapBytes       []byte
   worldMapLen         int
   toWorld       chan  []byte
@@ -91,6 +91,12 @@ func main() {
     defer pprof.StopCPUProfile()
   }
 
+  mapName := flag.Arg(0)
+  if mapName == "" { mapName = "localMap"}
+
+  wm, err := world.NewWorldMap(mapName)
+  if err != nil { panic(err) }
+
   // Populate config
   // TODO: take this from flags
   var config helpers.Config
@@ -112,6 +118,7 @@ func main() {
     launchTime: time.Now().UnixNano(),
     state: snet.DEAD,
     worldConnOpen: false,
+    worldMap: wm,
     toWorld: make(chan []byte, 32),
   }
 
@@ -183,7 +190,7 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
   binary.LittleEndian.PutUint32(portMsg[1:5], uint32(udpPort))
   c.Write(portMsg)
 
-  ps.simulation.Start(&ps.worldMap, &ps.players, ps.toWorld)
+  ps.simulation.Start(ps.worldMap, &ps.players, ps.toWorld)
 
   ps.state = snet.ALIVE
 
