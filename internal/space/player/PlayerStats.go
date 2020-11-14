@@ -11,7 +11,7 @@ func DefaultPlayerStats() PlayerStats{
 
   ps.Thrust = 12
   ps.MaxSpeed = 20
-  ps.Rotation = 210
+  ps.Rotation = 260
 
   return ps
 }
