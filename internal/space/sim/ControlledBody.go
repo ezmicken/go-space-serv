@@ -1,10 +1,13 @@
 package sim
 
 import(
+  //"log"
   "github.com/go-gl/mathgl/mgl32"
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/util"
+  //"go-space-serv/internal/space/geom"
+  "go-space-serv/internal/space/world"
 )
 
 type ControlledBody struct {
@@ -12,6 +15,7 @@ type ControlledBody struct {
   owningPlayer      *SimPlayer
   bod               *udp.UDPBody
   stateBuffer       *StateBuffer
+  Collider          *SpaceCollider
 }
 
 // instantiation
@@ -23,6 +27,7 @@ func NewControlledBody(plr *SimPlayer) (*ControlledBody) {
   cbod.owningPlayer = plr
   cbod.bod = udp.NewUDPBody(snet.GetNextId())
   cbod.stateBuffer = NewStateBuffer(256)
+  cbod.Collider = NewSpaceCollider(96, 48)
 
   return &cbod
 }
@@ -77,7 +82,6 @@ func (cb *ControlledBody) InputToState(seq int, moveshoot byte) {
     if ht.Velocity.LenSqr() > (stats.MaxSpeed * stats.MaxSpeed) {
       ht.Velocity = ht.Velocity.Normalize().Mul(stats.MaxSpeed)
     }
-
     ht.VelocityDelta = ht.Velocity.Sub(originalVel)
   } else {
     ht.VelocityDelta = mgl32.Vec3{0, 0, 0}
@@ -88,7 +92,7 @@ func (cb *ControlledBody) InputToState(seq int, moveshoot byte) {
   cb.stateBuffer.Clean()
 }
 
-func (cb *ControlledBody) ProcessFrame(frameStart int64, seq int) (x, y float32) {
+func (cb *ControlledBody) ProcessFrame(frameStart int64, seq int, wm *world.WorldMap) (x, y float32) {
   cb.bod.Position = cb.bod.TargetPosition
   cb.bod.Angle = cb.bod.TargetAngle
 
@@ -98,6 +102,22 @@ func (cb *ControlledBody) ProcessFrame(frameStart int64, seq int) (x, y float32)
     for ht.Seq < (seq - 1) {
       ht = cb.stateBuffer.Advance()
     }
+
+    cb.Collider.Update(ht.Position, ht.Velocity)
+    // potentialCollisions := wm.GetBlockRects(cb.Collider.Broad)
+    // if potentialCollisions != nil {
+    //   check := cb.Collider.Check(ht, potentialCollisions)
+    //   if ht != check {
+    //     stats := cb.controllingPlayer.Stats
+    //     if check.Velocity.LenSqr() > (stats.MaxSpeed * stats.MaxSpeed) {
+    //       check.Velocity = check.Velocity.Normalize().Mul(stats.MaxSpeed)
+    //     }
+    //     log.Printf("%v", check.VelocityDelta)
+    //     cb.stateBuffer.Insert(check)
+    //     cb.stateBuffer.Clean()
+    //     ht = check
+    //   }
+    // }
 
     cb.bod.TargetPosition = ht.Position
     cb.bod.TargetAngle = ht.Angle

@@ -162,7 +162,13 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
   // Advance the simulation by one step for each controlled body
   s.controlledBodies.Range(func(key, value interface{}) bool {
     cb := value.(*ControlledBody)
-    x, y = cb.ProcessFrame(frameStart, seq)
+    x, y = cb.ProcessFrame(frameStart, seq, s.worldMap)
+    player := cb.GetControllingPlayer()
+    if player != nil && player.Udp.GetState() == udp.PLAYING {
+      var debugMsg msg.DebugRectMsg
+      debugMsg.R = cb.Collider.Narrow
+      player.Udp.Outgoing <- &debugMsg
+    }
     if notifyWorld && x != -1 && y != -1 {
       gridX, gridY := s.worldMap.GetCellFromPosition(x, y)
       bod := cb.GetBody()
