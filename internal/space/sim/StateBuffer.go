@@ -90,11 +90,13 @@ func (sb *StateBuffer) Advance() HistoricalTransform {
   return result
 }
 
-func (sb *StateBuffer) Insert(ht HistoricalTransform) {
+func (sb *StateBuffer) Insert(ht HistoricalTransform, offset int) {
   if ht.Seq == sb.currentSeq && ht != sb.current {
-    sb.dirty(sb.currentSeq)
+    log.Printf("Cutting it close! %v", ht.Seq)
+    sb.dirty(sb.currentSeq + offset)
     sb.current = ht
   } else if ht.Seq < sb.currentSeq {
+    //log.Printf("Missed by %v", sb.currentSeq - ht.Seq)
     idx := sb.wrap(sb.pastHead - (sb.currentSeq - ht.Seq))
 
     if sb.past[idx].Seq != ht.Seq {
@@ -102,10 +104,11 @@ func (sb *StateBuffer) Insert(ht HistoricalTransform) {
     }
 
     if ht != sb.past[idx] {
-      sb.dirty(ht.Seq)
+      sb.dirty(ht.Seq + offset)
       sb.past[idx] = ht
     }
   } else if ht.Seq > sb.currentSeq {
+    //log.Printf("hit! ahead by %v", ht.Seq - sb.currentSeq)
     diff := ht.Seq - sb.currentSeq
     idx := sb.futureHead
     if diff > 1 {
@@ -113,7 +116,7 @@ func (sb *StateBuffer) Insert(ht HistoricalTransform) {
     }
 
     if ht != sb.future[idx] {
-      sb.dirty(ht.Seq)
+      sb.dirty(ht.Seq + offset)
       sb.future[idx] = ht
     }
   }
