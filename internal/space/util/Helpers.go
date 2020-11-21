@@ -5,7 +5,7 @@ import (
 )
 
 func PerSecondOverTime(stat float32, dur int64) float32 {
-  return stat * (float32(dur) / float32(1000))
+  return stat * (float32(dur) * float32(0.001))
 }
 
 func WrapFloat32(val, min, length float32) float32 {
