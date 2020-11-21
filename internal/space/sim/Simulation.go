@@ -139,7 +139,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
           cb := b.(*ControlledBody)
           m.BodyId = cb.GetBody().Id;
           s.players.PushExcluding(playerId, m)
-          cb.InputToState(int(m.Tick), m.MoveShoot)
+          cb.InputToState(int(m.Tick + 12), m.MoveShoot)
         }
 
         break
@@ -167,6 +167,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
     if player != nil && player.Udp.GetState() == udp.PLAYING {
       var debugMsg msg.DebugRectMsg
       debugMsg.R = cb.Collider.Narrow
+      debugMsg.Seq = uint16(seq)
       player.Udp.Outgoing <- &debugMsg
     }
     if notifyWorld && x != -1 && y != -1 {

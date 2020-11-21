@@ -9,6 +9,7 @@ import(
 
 type DebugRectMsg struct {
   R geom.Rect
+  Seq uint16
 }
 
 func (msg *DebugRectMsg) GetCmd() udp.UDPCmd { return udp.DEBUGRECT }
@@ -18,6 +19,8 @@ func (msg *DebugRectMsg) Serialize(bytes []byte) {
   bytes[offset] = byte(udp.DEBUGRECT)
   offset++
 
+  binary.LittleEndian.PutUint16(bytes[offset:offset+2], msg.Seq)
+  offset += 2
   binary.LittleEndian.PutUint32(bytes[offset:offset+4], math.Float32bits(msg.R.X))
   offset += 4
   binary.LittleEndian.PutUint32(bytes[offset:offset+4], math.Float32bits(msg.R.Y))
@@ -31,7 +34,7 @@ func (msg *DebugRectMsg) Serialize(bytes []byte) {
 }
 
 func (msg *DebugRectMsg) GetSize() int {
-  return 17
+  return 19
 }
 
 func (msg *DebugRectMsg) Deserialize(bytes []byte, head int) int { return head }
