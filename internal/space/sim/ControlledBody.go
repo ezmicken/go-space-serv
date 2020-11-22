@@ -3,7 +3,6 @@ package sim
 import(
   //"log"
   "github.com/go-gl/mathgl/mgl32"
-  "github.com/chewxy/math32"
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/util"
