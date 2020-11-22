@@ -1,6 +1,7 @@
 package sim
 
 import(
+  //"log"
   "github.com/go-gl/mathgl/mgl32"
   "github.com/chewxy/math32"
   "go-space-serv/internal/space/geom"
@@ -19,6 +20,7 @@ type SpaceCollider struct {
 type collision struct {
   Time float32
   Normal mgl32.Vec3
+  Area float32
 }
 
 func NewSpaceCollider(broadSize, narrowSize int) *SpaceCollider {
@@ -46,57 +48,48 @@ func (sc *SpaceCollider) Update(position, velocity mgl32.Vec3) {
   sc.Narrow.Y = position.Y() - float32(sc.halfNarrowSize)
 }
 
-func (sc *SpaceCollider) Check(ht HistoricalTransform, potentialCollisions []geom.Rect) HistoricalTransform {
-  var closestX collision
-  closestX.Time = 1.0
-  closestX.Normal = mgl32.Vec3{0, 0, 0}
-  closestY := closestX
+func (sc *SpaceCollider) Check(ht HistoricalTransform, potentialCollisions []geom.Rect) (HistoricalTransform, int) {
+  var closest collision
+  closest.Time = float32(1.0)
+  closest.Normal = mgl32.Vec3{0, 0, 0}
+  closest.Area = 0.0
+  closestIdx := -1
+
   for i := 0; i < len(potentialCollisions); i++ {
     col := sc.sweep(ht.Velocity, potentialCollisions[i])
-    if math32.Abs(col.Normal.X()) > 0.001 && col.Time < closestX.Time {
-      closestX = col
-    }
-
-    if math32.Abs(col.Normal.Y()) > 0.001 && col.Time < closestY.Time {
-      closestY = col
+    if col.Area > closest.Area {
+      closest = col
+      closestIdx = i
     }
   }
 
   pos := ht.Position
   vel := ht.Velocity
 
-  remainingTime := 1.0 - closestX.Time
-  pos[0] += (vel.X() * closestX.Time)
-  collided := false
-  if remainingTime > 0 {
-    if math32.Abs(vel.X()) < 1 {
-      pos[0] -= (vel.X() * closestX.Time)
-      vel[0] = 0
-    } else {
-      if math32.Abs(closestX.Normal.X()) > 0.001 {
-        vel[0] *= -0.5
+  remainingTime := float32(1.0) - closest.Time
+  if remainingTime > 0.0 {
+    if math32.Abs(closest.Normal[0]) > 0.001 {
+      if math32.Abs(vel[0]) < 1.0 {
+        pos[0] += (vel[0] * closest.Time)
+        vel[0] = 0.0
+      } else {
+        pos[0] += (vel[0] * closest.Time)
+        vel[0] *= float32(-0.5)
+        pos[0] += (vel[0] * remainingTime)
       }
-      pos[0] += vel.X() * remainingTime
     }
-    collided = true
-  }
 
-  remainingTime = 1.0 - closestY.Time
-  pos[1] += (vel.Y() * closestY.Time)
-  if remainingTime > 0 {
-    if math32.Abs(vel.Y()) < 1 {
-      pos[1] -= (vel.Y() * closestY.Time)
-      vel[1] = 0
-    } else {
-      if math32.Abs(closestY.Normal.Y()) > 0.001 {
-        vel[1] *= -0.5
+    if math32.Abs(closest.Normal[1]) > 0.001 {
+      if math32.Abs(vel[1]) < 1.0 {
+        pos[1] += (vel[0] * closest.Time)
+        vel[1] = 0.0
+      } else {
+        pos[1] += (vel[1] * closest.Time)
+        vel[1] *= float32(-0.5)
+        pos[1] += (vel[1] * remainingTime)
       }
-      pos[1] += (vel.Y() * remainingTime)
     }
-    collided = true
-  }
 
-  if collided {
     ht.VelocityDelta = vel.Sub(ht.Velocity.Sub(ht.VelocityDelta))
     ht.Position = pos
     ht.Velocity = vel
@@ -104,7 +97,7 @@ func (sc *SpaceCollider) Check(ht HistoricalTransform, potentialCollisions []geo
     sc.Update(ht.Position, ht.Velocity)
   }
 
-  return ht
+  return ht, closestIdx
 }
 
 func (sc *SpaceCollider) sweep(velocity mgl32.Vec3, block geom.Rect) collision {
@@ -157,14 +150,14 @@ func (sc *SpaceCollider) sweep(velocity mgl32.Vec3, block geom.Rect) collision {
   exiting := entryTime > exitTime
   negativeEntry := (txEntry < 0.0 && tyEntry < 0.0)
   futureEntry := txEntry > 1.0 || tyEntry > 1.0
-  verticalCorner := txEntry > tyEntry && math32.Abs(block.Y - (sc.Narrow.Y + sc.Narrow.H)) < 1
-  horizontalCorner := tyEntry > txEntry && math32.Abs(block.X - (sc.Narrow.X + sc.Narrow.W)) < 1
 
-  if exiting || negativeEntry || futureEntry || verticalCorner || horizontalCorner {
+  if exiting || negativeEntry || futureEntry {
     result.Time = 1.0
     result.Normal = mgl32.Vec3{0, 0, 0}
   } else {
     result.Time = entryTime
+    movedBody := geom.NewRect(sc.Narrow.X + velocity[0], sc.Narrow.Y + velocity[1], sc.Narrow.W, sc.Narrow.H)
+    result.Area = geom.RectOverlap(movedBody, block)
     if txEntry > tyEntry {
       if dxEntry < 0.0 {
         result.Normal = mgl32.Vec3{1, 0, 0}
