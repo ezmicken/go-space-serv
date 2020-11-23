@@ -4,6 +4,8 @@ world:
 	go build -o ./bin/world ./cmd/world/
 sim:
 	go build -o ./bin/sim ./cmd/sim/
+spacesim:
+	go build -o ./bin/spacesim.dylib -buildmode=c-shared ./pkg/spacesim
 gen:
 	go build -o ./bin/gen ./cmd/gen/
 winworld:
