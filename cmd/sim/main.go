@@ -20,7 +20,6 @@ import (
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
-  "go-space-serv/internal/space/sim"
 )
 
 const cmdLen            int     = 1
@@ -46,9 +45,9 @@ type physicsServer struct {
   shutdown      chan  struct{}
   state               snet.ServerState
 
-  players             sim.SimPlayers
-  simulation          sim.Simulation
-  msgFactory          sim.SimMsgFactory
+  players             SimPlayers
+  simulation          Simulation
+  msgFactory          SimMsgFactory
   ipsToPlayers        sync.Map
 
   launchTime          int64
@@ -231,7 +230,7 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
           reader.Discard(16)
           playerId, _ := uuid.FromBytes(idBytes)
           ps.players.Remove(playerId)
-          ps.simulation.RemoveControlledBody(playerId)
+          //ps.simulation.RemoveControlledBody(playerId)
         }
       } else if event[0] == byte(snet.IShutdown) {
         ps.state = snet.SHUTDOWN

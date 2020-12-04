@@ -322,6 +322,7 @@ func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn) bool {
     }
 
     cmd := UDPCmd(bytes[4])
+    log.Printf("%d", cmd)
     if cmd == CHALLENGE {
       challengeResponse := snet.Read_int64(bytes[5:13])
       if challengeResponse == p.clientSalt ^ p.serverSalt {

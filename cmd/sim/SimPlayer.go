@@ -1,4 +1,4 @@
-package sim
+package main
 
 import(
   "go-space-serv/internal/space/snet/udp"
