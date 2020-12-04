@@ -12,7 +12,6 @@ import (
   "github.com/panjf2000/gnet/pool/goroutine"
   "github.com/google/uuid"
 
-  "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/snet"
   "go-space-serv/internal/space/snet/tcp"
 )
@@ -28,9 +27,9 @@ type worldServer struct {
   physicsIP         net.IP
   physicsPort       uint32
 
-  wld               *world.World
-  players           *world.WorldPlayers
-  msgFactory        world.WorldMsgFactory
+  wld               *World
+  players           *WorldPlayers
+  msgFactory        WorldMsgFactory
   addrToId          sync.Map
 
   // lifecycle
@@ -52,10 +51,10 @@ func main() {
 
   if mapName == "" { mapName = "localMap" }
 
-  var plrs world.WorldPlayers
+  var plrs WorldPlayers
   plrs.Count = 0
 
-  w, err := world.NewWorld(&plrs, mapName)
+  w, err := NewWorld(&plrs, mapName)
   if err != nil {
     panic(err)
   }

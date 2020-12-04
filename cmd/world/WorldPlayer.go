@@ -1,4 +1,4 @@
-package world
+package main
 
 import (
   //"log"
@@ -6,6 +6,7 @@ import (
   "github.com/google/uuid"
   "go-space-serv/internal/space/snet/tcp"
   "go-space-serv/internal/space/player"
+  "go-space-serv/internal/space/world"
 )
 
 type WorldPlayer struct {
@@ -20,7 +21,7 @@ type WorldPlayer struct {
 }
 
 // TODO: make sure the previous update finished first!
-func (p *WorldPlayer) Update(x, y uint16, worldMap *WorldMap) {
+func (p *WorldPlayer) Update(x, y uint16, worldMap *world.WorldMap) {
   p.X = x
   p.Y = y
 

@@ -1,4 +1,4 @@
-package world
+package main
 
 import(
   "log"
@@ -6,12 +6,13 @@ import(
 
   "github.com/google/uuid"
 
+  "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/world/msg"
   "go-space-serv/internal/space/snet"
 )
 
 type World struct {
-  worldMap *WorldMap
+  worldMap *world.WorldMap
   players  *WorldPlayers
   bodyToPlayer map[uint16]uuid.UUID
 }
@@ -19,7 +20,7 @@ type World struct {
 func NewWorld(wp *WorldPlayers, mapName string) (*World, error) {
   var wld World
   wld.players = wp
-  wm, err := NewWorldMap(mapName)
+  wm, err := world.NewWorldMap(mapName)
   if err != nil {
     return nil, err
   }
