@@ -46,7 +46,7 @@ type physicsServer struct {
   state               snet.ServerState
 
   players             SimPlayers
-  simulation          Simulation
+  simulation          Sim
   msgFactory          SimMsgFactory
   ipsToPlayers        sync.Map
 

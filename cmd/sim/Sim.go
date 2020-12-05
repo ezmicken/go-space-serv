@@ -8,7 +8,6 @@ import (
 
   //"github.com/go-gl/mathgl/mgl32"
   //"github.com/google/uuid"
-  //"github.com/ezmicken/spacesim"
 
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
@@ -17,7 +16,7 @@ import (
   "go-space-serv/internal/space/snet"
 )
 
-type Simulation struct {
+type Sim struct {
   bodyIdsByPlayer     *sync.Map
   worldMap            *world.WorldMap
   players             *SimPlayers
@@ -33,7 +32,7 @@ type Simulation struct {
   ticker              *time.Ticker
 }
 
-func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers, worldChan chan []byte) {
+func (s *Sim) Start(worldMap *world.WorldMap, players *SimPlayers, worldChan chan []byte) {
   s.players = players
   s.toWorld = worldChan
   s.fromPlayers = make(chan udp.UDPMsg, 100)
@@ -45,10 +44,10 @@ func (s *Simulation) Start(worldMap *world.WorldMap, players *SimPlayers, worldC
   go s.loop()
 }
 
-// Simulation loop
+// Sim loop
 // Determines when to process frames.
 // Processes input not related to controlled bodies
-func (s *Simulation) loop() {
+func (s *Sim) loop() {
   defer s.ticker.Stop()
   simulationStart := time.Now().UnixNano()
   s.lastSync = simulationStart
@@ -86,7 +85,7 @@ func (s *Simulation) loop() {
 //   - process incoming messages fom players
 //   - produce outgoing messages for players
 //   - instruct UDPPlayer to pack and send messages
-func (s *Simulation) processFrame(frameStart int64, seq int) {
+func (s *Sim) processFrame(frameStart int64, seq int) {
   // Process incoming messages from players
   for j := 0; j < 50; j++ {
     tmp := s.pullFromPlayers()
@@ -224,7 +223,7 @@ func (s *Simulation) processFrame(frameStart int64, seq int) {
 // Actions
 //////////////
 
-func (s *Simulation) pullFromPlayers() interface{} {
+func (s *Sim) pullFromPlayers() interface{} {
   var tmp interface{}
   select {
   case tmp = <-s.fromPlayers:
@@ -238,6 +237,6 @@ func (s *Simulation) pullFromPlayers() interface{} {
 // Access
 /////////////
 
-func (s *Simulation) GetPlayerChan() chan udp.UDPMsg {
+func (s *Sim) GetPlayerChan() chan udp.UDPMsg {
   return s.fromPlayers
 }
