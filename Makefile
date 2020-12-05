@@ -1,13 +1,11 @@
-all:
-	go build -o ./bin/world ./cmd/world/ | go build -o ./bin/sim ./cmd/sim/ | go build -o ./bin/gen ./cmd/gen/
 world:
 	go build -o ./bin/world ./cmd/world/
 sim:
 	go build -o ./bin/sim ./cmd/sim/
-spacesim:
-	go build -o ./bin/spacesim.dylib -buildmode=c-shared ./pkg/spacesim
 gen:
 	go build -o ./bin/gen ./cmd/gen/
+spacesim-osx:
+	env GOOS=darwin go build -x -v -o ./bin/spacesim.dylib -buildmode=c-shared ./cmd/spacesim
 winworld:
 	env GOOS=windows GOARCH=amd64 go build -o ./bin/world.exe ./cmd/world
 winsim:
