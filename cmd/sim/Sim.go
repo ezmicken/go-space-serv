@@ -11,6 +11,7 @@ import (
   "github.com/ezmicken/uuint16"
   "github.com/google/uuid"
 
+  "go-space-serv/internal/space/geom"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/sim/msg"
@@ -210,7 +211,10 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
       x := nextPos.X.Float()
       y := nextPos.Y.Float()
       if player != nil && player.Udp.GetState() == udp.PLAYING {
-        // send debug rect
+        var debugMsg msg.DebugRectMsg
+        debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
+        debugMsg.Seq = uint16(seq)
+        player.Udp.Outgoing <- &debugMsg
       }
       if notifyWorld {
         xCoord, yCoord := s.worldMap.GetCellFromPosition(x, y)
