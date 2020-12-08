@@ -106,4 +106,12 @@ func GetPositionY(id, seq uint16) float32 {
   return 0
 }
 
+//export SetBlockBits
+func SetBlockBits(id uint16, top, bot byte) {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    cb.SetBlockBits(top, bot)
+  }
+}
+
 func main(){}
