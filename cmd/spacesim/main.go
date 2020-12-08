@@ -75,4 +75,35 @@ func GetNextPositionY(id uint16) float32 {
 
   return 0
 }
+
+//export GetAngle
+func GetAngle(id, seq uint16) int32 {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    return cb.GetAngle(seq)
+  }
+
+  return 0
+}
+
+//export GetPositionX
+func GetPositionX(id, seq uint16) float32 {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    return cb.GetPositionX(seq).Float()
+  }
+
+  return 0
+}
+
+//export GetPositionY
+func GetPositionY(id, seq uint16) float32 {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    return cb.GetPositionY(seq).Float()
+  }
+
+  return 0
+}
+
 func main(){}
