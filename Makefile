@@ -1,9 +1,9 @@
 world:
-	go build -o ./bin/world ./cmd/world/
+	env GOOS=linux GOARCH=amd64 go build -o ./bin/world ./cmd/world/
 sim:
-	go build -o ./bin/sim ./cmd/sim/
+	env GOOS=linux GOARCH=amd64 go build -o ./bin/sim ./cmd/sim/
 gen:
-	go build -o ./bin/gen ./cmd/gen/
+	env GOOS=linux GOARCH=amd64 go build -o ./bin/gen ./cmd/gen/
 spacesim-osx:
 	env GOOS=darwin go build -x -v -o ./bin/spacesim.dylib -buildmode=c-shared ./cmd/spacesim
 winworld:
