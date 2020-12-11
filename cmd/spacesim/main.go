@@ -106,11 +106,11 @@ func GetPositionY(id, seq uint16) float32 {
   return 0
 }
 
-//export SetBlockBits
-func SetBlockBits(id uint16, top, bot byte) {
+//export AddBlock
+func AddBlock(id uint16, x, y int32) {
   cb := sim.GetControlledBody(id)
   if cb != nil {
-    cb.SetBlockBits(top, bot)
+    cb.AddBlock(x, y)
   }
 }
 
