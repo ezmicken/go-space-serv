@@ -14,8 +14,8 @@ func Initialize(ts , scale int32) {
 }
 
 //export AddControlledBody
-func AddControlledBody(id uint16, x, y int32) {
-  sim.AddControlledBody(id, x, y)
+func AddControlledBody(id uint16, x, y, d int32) {
+  sim.AddControlledBody(id, x, y, d)
 }
 
 //export RemoveControlledBody
@@ -27,7 +27,7 @@ func RemoveControlledBody(id uint16) {
 func PushInput(id uint16, tick uint16, moveshoot byte) {
   cb := sim.GetControlledBody(id)
   if cb != nil {
-    cb.InputToState(tick, moveshoot)
+    cb.PushInput(tick, moveshoot)
   }
 }
 
