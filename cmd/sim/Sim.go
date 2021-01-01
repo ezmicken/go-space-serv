@@ -72,6 +72,7 @@ func (s *Sim) loop() {
     if framesToProcess > 0 {
       for i := int64(0); i < framesToProcess; i++ {
         s.seq++
+        s.space.Advance(int(s.seq))
         s.lastFrame = s.lastSync + (int64(s.seq) * timestepNano)
         s.processFrame(s.lastFrame, int(s.seq))
 
@@ -79,8 +80,6 @@ func (s *Sim) loop() {
           shouldSync = true
           s.seq = 1
         }
-
-        s.space.Advance(int(s.seq))
       }
     } else if shouldSync {
       shouldSync = false
@@ -127,7 +126,7 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
             x, y := s.worldMap.GetSpawnPoint()
             pBodId, err := uuint16.Rent()
             if err != nil { panic(err.Error()) }
-            s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY))
+            s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), int32(1))
             s.bodyIdsByPlayer.Store(playerId, pBodId)
             player.Udp.SetState(udp.PLAYING)
 
@@ -159,7 +158,7 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
 
                 // tell other playesr
                 var response msg.ExitMsg
-                response.BodyId = 0//bodyId
+                response.BodyId = bodyId
                 s.players.PushAll(&response)
 
                 // tell the map server
@@ -177,7 +176,7 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
         if ok {
           cb := s.space.GetControlledBody(id.(uint16))
           if cb != nil {
-            cb.InputToState((m.Tick + 12), m.MoveShoot)
+            cb.PushInput((m.Tick + 12), m.MoveShoot)
             s.players.PushExcluding(playerId, m)
           }
         }
@@ -206,6 +205,7 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
     player := s.players.GetPlayer(playerId)
     cb := s.space.GetControlledBody(id)
     if cb != nil {
+      s.worldMap.PushBlockRects(seq, cb)
       cb.Advance(uint16(seq))
       nextPos := cb.GetBody().NextPos
       x := nextPos.X.Float()
