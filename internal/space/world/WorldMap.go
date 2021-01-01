@@ -9,6 +9,7 @@ import (
 
   "github.com/akavel/polyclip-go"
   "github.com/go-gl/mathgl/mgl32"
+  "github.com/ezmicken/spacesim"
 
   "go-space-serv/internal/space/world/msg"
   "go-space-serv/internal/space/geom"
@@ -104,7 +105,12 @@ func (wm *WorldMap) serializeChunk(x, y int, id uint16) msg.BlocksMsg {
   return blocksMsg
 }
 
-func (wm *WorldMap) GetBlockRects(playerBox geom.Rect) []geom.Rect {
+func (wm *WorldMap) PushBlockRects(seq int, cb *spacesim.ControlledBody) {
+  // TODO: find a better way to do this.
+  xPos := cb.GetPositionX(uint16(seq)-1)
+  yPos := cb.GetPositionY(uint16(seq)-1)
+  playerBox := geom.NewRect(xPos.Float() - 64, yPos.Float() - 64, 128, 128)
+
   // Get playerBox in block coordinates
   blockMinX, blockMinY := wm.GetCellFromPosition(playerBox.X, playerBox.Y)
   blockMaxX, blockMaxY := wm.GetCellFromPosition(playerBox.X + playerBox.W, playerBox.Y + playerBox.H)
@@ -154,14 +160,19 @@ func (wm *WorldMap) GetBlockRects(playerBox geom.Rect) []geom.Rect {
 
   // Best case -- all chips cover same chunk.
   if chipNW.chunkId == chipNE.chunkId && chipNW.chunkId == chipSE.chunkId && chipNW.chunkId == chipSW.chunkId {
-    if chipNW.blocks == nil {
-      return nil
+    actualChip := invalidChip
+    if chipNW.blocks != nil { actualChip = chipNW }
+    if chipNE.blocks != nil { actualChip = chipNE }
+    if chipSE.blocks != nil { actualChip = chipSE }
+    if chipSW.blocks != nil { actualChip = chipSW }
+    if actualChip.blocks == nil {
+      return
     }
 
     i := 0
-    for y := 0; y < chipNW.box.H; y++ {
-      for x := 0; x < chipNW.box.W; x++ {
-        color := chipNW.blocks[(int(wm.info.ChunkSize) * (y + chipNW.box.Y)) + (x + chipNW.box.X)]
+    for y := 0; y < actualChip.box.H; y++ {
+      for x := 0; x < actualChip.box.W; x++ {
+        color := actualChip.blocks[(int(wm.info.ChunkSize) * (y + actualChip.box.Y)) + (x + actualChip.box.X)]
         if color <= 0 {
           numSolid--
         }
@@ -186,23 +197,23 @@ func (wm *WorldMap) GetBlockRects(playerBox geom.Rect) []geom.Rect {
 
   // Create a rect in world space for each solid block
   if numSolid > 0 {
-    result := make([]geom.Rect, numSolid)
-    iRes := 0
     iBlx := 0
+    worldSize := int(actualWorldSize)
     for y := 0; y < blockBox.H; y++ {
       for x := 0; x < blockBox.W; x++ {
-        if blocks[iBlx] > 0 {
-          result[iRes] = geom.NewRect(float32(blockBox.X + x) * RESOLUTION, float32(blockBox.Y + y) * RESOLUTION, RESOLUTION, RESOLUTION)
-          iRes++
-        }
+        blockIsSolid := false       || blockBox.X + x < 0
+        blockIsSolid = blockIsSolid || blockBox.Y + y < 0
+        blockIsSolid = blockIsSolid || blockBox.X + x > worldSize
+        blockIsSolid = blockIsSolid || blockBox.Y + y > worldSize
+        blockIsSolid = blockIsSolid || blocks[iBlx] > 0
         iBlx++
+
+        if blockIsSolid {
+          cb.AddBlock(int32(blockBox.X + x), int32(blockBox.Y + y))
+        }
       }
     }
-
-    return result
   }
-
-  return nil
 }
 
 func (wm *WorldMap) transformBlocks(blockBox geom.RectInt, ch chip, blocks []byte, quad int) int {

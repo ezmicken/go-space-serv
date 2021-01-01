@@ -5,7 +5,7 @@ sim:
 gen:
 	env GOOS=linux GOARCH=amd64 go build -o ./bin/gen ./cmd/gen/
 spacesim-osx:
-	env GOOS=darwin go build -x -v -o ./bin/spacesim.dylib -buildmode=c-shared ./cmd/spacesim
+	env GOOS=darwin go build -o ./bin/spacesim.dylib -buildmode=c-shared ./cmd/spacesim
 winworld:
 	env GOOS=windows GOARCH=amd64 go build -o ./bin/world.exe ./cmd/world
 winsim:
