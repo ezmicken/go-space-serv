@@ -32,6 +32,11 @@ func (mf *SimMsgFactory) CreateAndPublishMsg(packet []byte, head int, target cha
     head = m.Deserialize(packet, head)
     m.SetPlayerId(playerId)
     target <- m
+  } else if cmd == udp.NONE {
+    m := &msg.CmdMsg{}
+    head = m.Deserialize(packet, head)
+    m.SetPlayerId(playerId)
+    target <- m
   }
 
   return head
