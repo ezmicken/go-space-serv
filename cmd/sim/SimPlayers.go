@@ -16,11 +16,9 @@ type SimPlayers struct {
 }
 
 func (p *SimPlayers) Add(udpPlayer *udp.UDPPlayer) {
-  var plr SimPlayer
-  plr.Stats = player.DefaultPlayerStats()
-  plr.Udp = udpPlayer
+  plr := NewSimPlayer(player.DefaultPlayerStats(), udpPlayer)
 
-  _, exists := p.playerMap.LoadOrStore(plr.Udp.Id, &plr)
+  _, exists := p.playerMap.LoadOrStore(plr.Udp.Id, plr)
   if !exists {
     p.Count += 1
     log.Printf("%v joined the simulation.", plr.Udp.Id)
@@ -28,8 +26,11 @@ func (p *SimPlayers) Add(udpPlayer *udp.UDPPlayer) {
 }
 
 func (p *SimPlayers) Remove(id uuid.UUID) {
-  p.playerMap.Delete(id)
-  log.Printf("%s left the simulation", id)
+  plr, ok := p.playerMap.Load(id)
+  if ok {
+    player := plr.(*SimPlayer)
+    player.OnDisconnect()
+  }
 }
 
 func (p *SimPlayers) GetPlayer(id uuid.UUID) *SimPlayer {
@@ -70,10 +71,29 @@ func (p *SimPlayers) PushExcluding(playerId uuid.UUID, msg udp.UDPMsg) {
   })
 }
 
+func (p *SimPlayers) Cull() {
+  var playersToCull []uuid.UUID = nil
+  p.playerMap.Range(func(key, value interface{}) bool {
+    plr := value.(*SimPlayer)
+    if plr.Udp.IsTimedOut() || plr.ShouldCull() {
+      if playersToCull == nil {
+        playersToCull = []uuid.UUID{}
+      }
+      playersToCull = append(playersToCull, plr.Udp.Id)
+    }
+    return true
+  })
+  for i := 0; i < len(playersToCull); i++ {
+    log.Printf("%s left the simulation", playersToCull[i])
+    p.playerMap.Delete(playersToCull[i])
+  }
+}
+
 func (p *SimPlayers) PackAndSend() {
   p.playerMap.Range(func(key, value interface{}) bool {
     plr := value.(*SimPlayer)
     if plr.Udp.GetState() >= udp.CONNECTED {
+      plr.OnPackAndSend()
       plr.Udp.PackAndSend()
     }
     return true
