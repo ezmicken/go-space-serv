@@ -21,8 +21,9 @@ func (msg *CmdMsg) Deserialize(packet []byte, head int) int {
 
 func (msg *CmdMsg) GetSize() int { return 1 }
 func (msg *CmdMsg) GetCmd() udp.UDPCmd { return msg.cmd }
+func (msg *CmdMsg) SetCmd(command udp.UDPCmd) { msg.cmd = command }
 
 func (msg *CmdMsg) SetPlayerId(id uuid.UUID) { msg.playerId = id }
 func (msg *CmdMsg) GetPlayerId() uuid.UUID { return msg.playerId }
 
-func (msg *CmdMsg) Serialize([]byte) {}
+func (msg *CmdMsg) Serialize(bytes []byte) { bytes[0] = byte(msg.cmd) }
