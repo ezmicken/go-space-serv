@@ -20,12 +20,11 @@ const (
   DISCONNECTED UDPPlayerState = iota
   CHALLENGED
   CONNECTED
-  PLAYING
-  SPECTATING
 )
 
 const BUFFER_SIZE uint16 = 1024
 const SHUTUP_TIME int    = 10
+const TIMEOUT            = 5000000000
 
 type PacketData struct {
   Acked     bool
@@ -45,6 +44,7 @@ type UDPPlayer struct {
   spamChan          chan struct{}
   active            bool
   lastSync          int64
+  lastPacketRx      int64
 
   // packet stuff
   clientSalt        int64
@@ -70,6 +70,7 @@ func NewPlayer(in chan UDPMsg, id uuid.UUID, factory UDPMsgFactory) *UDPPlayer {
   p.active = false
   p.state = DISCONNECTED
   p.lastSync = 0
+  p.lastPacketRx = 0
 
   p.txSeq = 0
   p.txAck = 0
@@ -172,6 +173,8 @@ func (p *UDPPlayer) Unpack(packet []byte) {
     return
   }
 
+  p.lastPacketRx = time.Now().UnixNano()
+
   // handle seq/ack
   head += 2
   seq := snet.Read_uint16(packet[tail:head])
@@ -214,9 +217,16 @@ func (p *UDPPlayer) PackAndSend() {
   shouldStop = shouldStop && p.shutupRx > SHUTUP_TIME
   shouldStop = shouldStop || p.state < CONNECTED
 
+  if shouldStop && p.active {
+    p.active = false
+    return
+  }
+
   if shouldStop {
     return
   }
+
+  p.active = true
 
   var header UDPHeader
   header.ProtocolId = helpers.GetProtocolId()
@@ -280,13 +290,13 @@ func (p *UDPPlayer) PackAndSend() {
 
     msg = nil
   }
-
   header.Serialize(p.packetBuffer)
   p.connection.SendTo(p.packetBuffer[:p.packetBufferTail])
 }
 
 // TODO: add sequence to this
 func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn) bool {
+  p.lastPacketRx = time.Now().UnixNano()
   // Respond to HELLO with CHALLENGE
   if p.state == DISCONNECTED {
     // enforce padding to avoid participating in DDoS minification
@@ -333,7 +343,6 @@ func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn) bool {
         msgBytes[4] = byte(WELCOME)
         binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(p.clientSalt ^ p.serverSalt))
         p.sendRepeating(msgBytes, 500, 20)
-        p.state = SPECTATING
         return true
       }
     }
@@ -344,10 +353,23 @@ func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn) bool {
   return false
 }
 
+func (p *UDPPlayer) Disconnect() {
+  close(p.Outgoing)
+  p.state = DISCONNECTED
+}
+
 func (p *UDPPlayer) SetState(s UDPPlayerState) {
   p.state = s
 }
 
 func (p *UDPPlayer) GetState() UDPPlayerState {
   return p.state
+}
+
+func (p *UDPPlayer) IsActive() bool {
+  return p.active
+}
+
+func (p *UDPPlayer) IsTimedOut() bool {
+  return time.Now().UnixNano() - p.lastPacketRx > TIMEOUT
 }
