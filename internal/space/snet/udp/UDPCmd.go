@@ -14,5 +14,6 @@ const (
   EXIT
   MOVESHOOT
   DEBUGRECT
+  PING
 )
 
