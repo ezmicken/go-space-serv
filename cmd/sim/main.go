@@ -230,7 +230,6 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
           reader.Discard(16)
           playerId, _ := uuid.FromBytes(idBytes)
           ps.players.Remove(playerId)
-          //ps.simulation.RemoveControlledBody(playerId)
         }
       } else if event[0] == byte(snet.IShutdown) {
         ps.state = snet.SHUTDOWN

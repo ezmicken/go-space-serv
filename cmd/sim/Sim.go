@@ -11,7 +11,7 @@ import (
   "github.com/ezmicken/uuint16"
   "github.com/google/uuid"
 
-  "go-space-serv/internal/space/geom"
+  //"go-space-serv/internal/space/geom"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/sim/msg"
@@ -106,6 +106,7 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
         m := t
         playerId := m.GetPlayerId()
         cmd := m.GetCmd()
+        player := s.players.GetPlayer(playerId)
         switch cmd {
           case udp.SYNC:
             syncTime := s.lastFrame / (int64(time.Millisecond) / int64(time.Nanosecond))
@@ -117,56 +118,14 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
             s.players.Push(playerId, &response)
           case udp.ENTER:
             // TODO: verify rtt/ploss limit
-            player := s.players.GetPlayer(playerId)
-            if player != nil && player.Udp.GetState() != udp.SPECTATING {
+            if player != nil && !player.IsSpectating() {
               log.Printf("player %s spawn when not spectating.", playerId)
               break
             }
 
-            x, y := s.worldMap.GetSpawnPoint()
-            pBodId, err := uuint16.Rent()
-            if err != nil { panic(err.Error()) }
-            s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), int32(1))
-            s.bodyIdsByPlayer.Store(playerId, pBodId)
-            player.Udp.SetState(udp.PLAYING)
-
-            log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, world.SPAWNX, world.SPAWNY, x, y)
-
-            // tell other players
-            var response msg.EnterMsg
-            response.PlayerId = player.Udp.Id
-            response.BodyId = pBodId
-            response.X = uint32(world.SPAWNX)
-            response.Y = uint32(world.SPAWNY)
-            s.players.PushAll(&response)
-
-            // tell the map server
-            worldSpawnMsg := []byte{byte(snet.ISpawn), 0, 0}
-            binary.LittleEndian.PutUint16(worldSpawnMsg[1:3], pBodId)
-
-            worldSpawnMsg = append(worldSpawnMsg,  playerId[0:]...)
-            s.toWorld <- worldSpawnMsg
+            s.spawnPlayer(player)
           case udp.EXIT:
-            player := s.players.GetPlayer(playerId)
-            if player != nil && player.Udp.GetState() == udp.PLAYING {
-              pBodId, ok := s.bodyIdsByPlayer.Load(playerId)
-              if ok {
-                bodyId := pBodId.(uint16)
-                s.space.RemoveControlledBody(bodyId)
-                s.bodyIdsByPlayer.Delete(playerId)
-                player.Udp.SetState(udp.SPECTATING)
-
-                // tell other playesr
-                var response msg.ExitMsg
-                response.BodyId = bodyId
-                s.players.PushAll(&response)
-
-                // tell the map server
-                worldSpecMsg := []byte{byte(snet.ISpec), 0, 0}
-                binary.LittleEndian.PutUint16(worldSpecMsg[1:3], bodyId)
-                s.toWorld <- worldSpecMsg
-              }
-            }
+            s.specPlayer(player)
         }
       case *msg.MoveShootMsg: // TODO: validate input
         m := t
@@ -198,11 +157,26 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
     worldMsg = append(worldMsg, byte(snet.IState))
   }
 
+  // temporary storage for players that should be removed.
+  var playersToSpec []*SimPlayer = nil
+
   // Advance the simulation one step for each controlled body
   s.bodyIdsByPlayer.Range(func(key, value interface{}) bool {
     id := value.(uint16)
     playerId := key.(uuid.UUID)
     player := s.players.GetPlayer(playerId)
+
+    // spec users who do not respond fast enough.
+    if player.Udp != nil {
+      if player.Udp.IsTimedOut() || player.ShouldCull() {
+        if playersToSpec == nil {
+          playersToSpec = []*SimPlayer{ player }
+        } else {
+          playersToSpec = append(playersToSpec, player)
+        }
+      }
+    }
+
     cb := s.space.GetControlledBody(id)
     if cb != nil {
       s.worldMap.PushBlockRects(seq, cb)
@@ -210,12 +184,13 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
       nextPos := cb.GetBody().NextPos
       x := nextPos.X.Float()
       y := nextPos.Y.Float()
-      if player != nil && player.Udp.GetState() == udp.PLAYING {
-        var debugMsg msg.DebugRectMsg
-        debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
-        debugMsg.Seq = uint16(seq)
-        player.Udp.Outgoing <- &debugMsg
-      }
+      // TODO: put this behind config flag
+      // if player != nil && player.Udp.GetState() == udp.PLAYING {
+      //   var debugMsg msg.DebugRectMsg
+      //   debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
+      //   debugMsg.Seq = uint16(seq)
+      //   player.Udp.Outgoing <- &debugMsg
+      // }
       if notifyWorld {
         xCoord, yCoord := s.worldMap.GetCellFromPosition(x, y)
         worldMsg = append(worldMsg, []byte{0, 0, 0, 0, 0, 0}...)
@@ -231,6 +206,15 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
     return true
   })
 
+  if playersToSpec != nil {
+    log.Printf("removing players");
+    for i := 0; i < len(playersToSpec); i++ {
+      s.specPlayer(playersToSpec[i])
+    }
+  }
+
+  s.players.Cull()
+
   if notifyWorld && len(worldMsg) > 1 {
     s.toWorld <- worldMsg
   }
@@ -240,6 +224,56 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
 
 // Actions
 //////////////
+
+func (s *Sim) spawnPlayer(player *SimPlayer) {
+  playerId := player.Udp.Id
+  x, y := s.worldMap.GetSpawnPoint()
+  pBodId, err := uuint16.Rent()
+  if err != nil { panic(err.Error()) }
+  s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), int32(1))
+  s.bodyIdsByPlayer.Store(playerId, pBodId)
+  player.OnEnter()
+
+  log.Printf("Spawning %s at %d/%d -- %f/%f", playerId, world.SPAWNX, world.SPAWNY, x, y)
+
+  // tell other players
+  var response msg.EnterMsg
+  response.PlayerId = player.Udp.Id
+  response.BodyId = pBodId
+  response.X = uint32(world.SPAWNX)
+  response.Y = uint32(world.SPAWNY)
+  s.players.PushAll(&response)
+
+  // tell the map server
+  worldSpawnMsg := []byte{byte(snet.ISpawn), 0, 0}
+  binary.LittleEndian.PutUint16(worldSpawnMsg[1:3], pBodId)
+
+  worldSpawnMsg = append(worldSpawnMsg,  playerId[0:]...)
+  s.toWorld <- worldSpawnMsg
+}
+
+func (s *Sim) specPlayer(player *SimPlayer) {
+  if player != nil {
+    playerId := player.Udp.Id
+    pBodId, ok := s.bodyIdsByPlayer.Load(playerId)
+    if ok {
+      bodyId := pBodId.(uint16)
+      s.space.RemoveControlledBody(bodyId)
+      s.bodyIdsByPlayer.Delete(playerId)
+      player.OnExit()
+
+      // tell other playesr
+      var response msg.ExitMsg
+      response.BodyId = bodyId
+      s.players.PushAll(&response)
+
+      // tell the map server
+      worldSpecMsg := []byte{byte(snet.ISpec), 0, 0}
+      binary.LittleEndian.PutUint16(worldSpecMsg[1:3], bodyId)
+      s.toWorld <- worldSpecMsg
+    }
+  }
+}
 
 func (s *Sim) pullFromPlayers() interface{} {
   var tmp interface{}
