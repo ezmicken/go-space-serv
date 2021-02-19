@@ -13,9 +13,24 @@ func Initialize(ts , scale int32) {
   sim = spacesim.NewSimulation(fixpoint.Q16FromInt32(ts), fixpoint.Q16FromInt32(scale))
 }
 
+//export Reset
+func Reset() {
+  sim.Reset()
+}
+
+//export Rewind
+func Rewind(seq uint16) {
+  sim.Rewind(seq)
+}
+
 //export AddControlledBody
 func AddControlledBody(id uint16, x, y, d int32) {
   sim.AddControlledBody(id, x, y, d)
+}
+
+//export OverwriteState
+func OverwriteState(seq, id, angle, angleDelta uint16, x, y, vx, vy, dvx, dvy int32) {
+  sim.OverwriteState(seq, id, angle, angleDelta, x, y, vx, vy, dvx, dvy)
 }
 
 //export RemoveControlledBody
