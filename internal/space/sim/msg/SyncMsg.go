@@ -7,17 +7,20 @@ import (
 
 type SyncMsg struct {
   // sent
-  Seq  uint16
-  Time uint64
+  Seq       uint16
+  Time      uint64
+  State     []byte
+  StateLen  int
 }
 
 func (msg *SyncMsg) GetCmd() udp.UDPCmd { return udp.SYNC }
-func (msg *SyncMsg) GetSize() int { return 11 }
+func (msg *SyncMsg) GetSize() int { return 11 + msg.StateLen }
 func (msg *SyncMsg) Serialize(bytes []byte) {
   bytes[0] = byte(udp.SYNC)
 
   binary.LittleEndian.PutUint16(bytes[1:3], msg.Seq)
-  binary.LittleEndian.PutUint64(bytes[3:], msg.Time)
+  binary.LittleEndian.PutUint64(bytes[3:11], msg.Time)
+  copy(bytes[11:], msg.State[:msg.StateLen])
 
   return
 }

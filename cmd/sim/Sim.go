@@ -11,7 +11,7 @@ import (
   "github.com/ezmicken/uuint16"
   "github.com/google/uuid"
 
-  //"go-space-serv/internal/space/geom"
+  "go-space-serv/internal/space/geom"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/sim/msg"
@@ -34,6 +34,9 @@ type Sim struct {
   fromPlayers chan    udp.UDPMsg  // incoming msgs from clients (UdpPlayer)
   toWorld     chan    []byte
   ticker              *time.Ticker
+
+  serializedState     [1024]byte
+  serializedStateSize int
 }
 
 func (s *Sim) Start(worldMap *world.WorldMap, players *SimPlayers, worldChan chan []byte) {
@@ -48,6 +51,8 @@ func (s *Sim) Start(worldMap *world.WorldMap, players *SimPlayers, worldChan cha
   ts := fixpoint.Q16FromInt32(int32(helpers.GetConfiguredTimestep()))
   scale := fixpoint.Q16FromInt32(32)
   s.space = spacesim.NewSimulation(ts, scale)
+  s.serializedState = [1024]byte{}
+  s.serializedStateSize = 0
   go s.loop()
 }
 
@@ -94,6 +99,7 @@ func (s *Sim) loop() {
 //   - produce outgoing messages for players
 //   - instruct UDPPlayer to pack and send messages
 func (s *Sim) processFrame(frameStart int64, seq int) {
+  s.serializedStateSize = s.space.SerializeState(s.serializedState[0:1024], 0)
   // Process incoming messages from players
   for j := 0; j < 50; j++ {
     tmp := s.pullFromPlayers()
@@ -114,6 +120,8 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
             var response msg.SyncMsg
             response.Seq = s.seq
             response.Time = uint64(syncTime)
+            response.State = s.serializedState[:s.serializedStateSize]
+            response.StateLen = s.serializedStateSize
 
             s.players.Push(playerId, &response)
           case udp.ENTER:
@@ -135,6 +143,7 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
         if ok {
           cb := s.space.GetControlledBody(id.(uint16))
           if cb != nil {
+            //log.Printf("%v: input received for %v", seq, m.Tick + 12)
             cb.PushInput((m.Tick + 12), m.MoveShoot)
             s.players.PushExcluding(playerId, m)
           }
@@ -185,12 +194,12 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
       x := nextPos.X.Float()
       y := nextPos.Y.Float()
       // TODO: put this behind config flag
-      // if player != nil && player.Udp.GetState() == udp.PLAYING {
-      //   var debugMsg msg.DebugRectMsg
-      //   debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
-      //   debugMsg.Seq = uint16(seq)
-      //   player.Udp.Outgoing <- &debugMsg
-      // }
+      if player != nil && player.IsPlaying() {
+        var debugMsg msg.DebugRectMsg
+        debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
+        debugMsg.Seq = uint16(seq)
+        player.Udp.Outgoing <- &debugMsg
+      }
       if notifyWorld {
         xCoord, yCoord := s.worldMap.GetCellFromPosition(x, y)
         worldMsg = append(worldMsg, []byte{0, 0, 0, 0, 0, 0}...)
