@@ -23,6 +23,25 @@ func Rewind(seq uint16) {
   sim.Rewind(seq)
 }
 
+//export ClearInput
+func ClearInput(id uint16) {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    cb.ClearInput()
+  }
+}
+
+//export PeekSeq
+func PeekSeq(id uint16) uint16 {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    ht := cb.PeekState()
+    return ht.Seq
+  }
+
+  return 0
+}
+
 //export AddControlledBody
 func AddControlledBody(id uint16, x, y, d int32) {
   sim.AddControlledBody(id, x, y, d)
