@@ -141,10 +141,13 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
 
         id, ok := s.bodyIdsByPlayer.Load(playerId)
         if ok {
-          cb := s.space.GetControlledBody(id.(uint16))
+          bodyId := id.(uint16)
+          cb := s.space.GetControlledBody(bodyId)
           if cb != nil {
-            //log.Printf("%v: input received for %v", seq, m.Tick + 12)
+            //log.Printf("%v: input received for %v", seq, m.Tick)
             cb.PushInput((m.Tick + 12), m.MoveShoot)
+            m.BodyId = bodyId
+            m.Tick += 12
             s.players.PushExcluding(playerId, m)
           }
         }
