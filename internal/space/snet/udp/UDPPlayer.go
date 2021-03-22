@@ -56,6 +56,8 @@ type UDPPlayer struct {
   txSeq             uint16
   txAck             uint16
   rxSeq             uint16
+  txAckedBytes      int64
+  prevAckedBytes    int64
 
   shutupTx          int
   shutupRx          int
@@ -75,7 +77,9 @@ func NewPlayer(in chan UDPMsg, id uuid.UUID, factory UDPMsgFactory) *UDPPlayer {
   p.txSeq = 0
   p.txAck = 0
   p.rxSeq = 0
-  p.packetBufferTail = 0
+  p.txAckedBytes = 0
+  p.prevAckedBytes = 0
+  p.packetBufferTail = HEADER_SIZE
   p.packetBufferEmpty = true
   p.shutupRx = 0
   p.shutupTx = 0
@@ -112,6 +116,7 @@ func (p *UDPPlayer) onPacketAcked(seq uint16) {
   if p.seqBuffer[idx] == uint32(seq) {
     p.packetData[idx].Acked = true
     p.seqBuffer[idx] = math.MaxUint32
+    p.txAckedBytes += int64(p.packetData[idx].Size)
   }
 
   // TODO: calculate exponential moving average RTT
@@ -200,6 +205,7 @@ func (p *UDPPlayer) Unpack(packet []byte) {
 
     if seqGreaterThan(seq, p.rxSeq) {
       p.rxSeq = seq
+      log.Printf("rx: %v", cmd)
 
       for head < msgLen {
         head = p.msgFactory.CreateAndPublishMsg(packet, head, p.incoming, p.Id)
@@ -252,10 +258,21 @@ func (p *UDPPlayer) PackAndSend() {
   }
 
   // Move the tail based on newest ack
-  p.packetBufferTail = HEADER_SIZE
-  for i := p.txSeq; i < p.txAck; i-- {
-    pd := p.getPacketData(i)
-    p.packetBufferTail += int(pd.Size)
+  // p.packetBufferTail = HEADER_SIZE
+  // for i := p.txSeq; i < p.txAck; i-- {
+  //   pd := p.getPacketData(i)
+  //   p.packetBufferTail += int(pd.Size)
+  // }
+
+  if p.txAckedBytes > p.prevAckedBytes {
+    ackedBytes := int(p.txAckedBytes - p.prevAckedBytes)
+    for i := 0; i < ackedBytes; i++ {
+      // TODO: stop this from overflowing.
+      p.packetBuffer[HEADER_SIZE + i] = p.packetBuffer[HEADER_SIZE + ackedBytes + i];
+    }
+    p.packetBufferTail -= ackedBytes
+    p.prevAckedBytes = p.txAckedBytes
+    log.Printf("tail moved left %v(%v)", ackedBytes, p.packetBufferTail)
   }
 
   for j := 0; j < 50; j++ {
@@ -271,22 +288,19 @@ func (p *UDPPlayer) PackAndSend() {
       log.Printf("%v packetBuffer overflow.", p.Id)
     }
 
-    if !p.packetBufferEmpty {
-      for k := p.packetBufferTail + msgSize; k >= (HEADER_SIZE+msgSize); k-- {
-        p.packetBuffer[k] = p.packetBuffer[k-msgSize]
-      }
-    }
-
     p.txSeq++
     header.Seq = p.txSeq
+    log.Printf("tx: %v", msg.GetCmd())
+    msg.Serialize(p.packetBuffer[p.packetBufferTail : p.packetBufferTail+msgSize])
     p.packetBufferTail += msgSize
-    msg.Serialize(p.packetBuffer[HEADER_SIZE : HEADER_SIZE+msgSize])
     p.packetBufferEmpty = false;
+    log.Printf("tail moved right %v(%v)", msgSize, p.packetBufferTail)
 
     var pd PacketData
     pd.Acked = false
     pd.SendTime = helpers.NowMillis()
     pd.Size = int32(msgSize)
+    p.insertPacketData(pd, p.txSeq)
 
     msg = nil
   }

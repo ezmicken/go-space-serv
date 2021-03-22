@@ -16,4 +16,3 @@ const (
   DEBUGRECT
   PING
 )
-
