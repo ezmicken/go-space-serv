@@ -3,9 +3,9 @@ package udp
 import (
   "log"
   "math"
-  "math/rand"
+  //"math/rand"
   "time"
-  "encoding/binary"
+  //"encoding/binary"
 
   "github.com/panjf2000/gnet"
   "github.com/google/uuid"
@@ -15,12 +15,6 @@ import (
 )
 
 type UDPPlayerState byte
-
-const (
-  DISCONNECTED UDPPlayerState = iota
-  CHALLENGED
-  CONNECTED
-)
 
 const BUFFER_SIZE uint16 = 1024
 const SHUTUP_TIME int    = 10
@@ -37,7 +31,6 @@ type UDPPlayer struct {
   Outgoing    chan  UDPMsg
 
   incoming    chan  UDPMsg
-  state             UDPPlayerState
   connection        gnet.Conn
   msgFactory        UDPMsgFactory
 
@@ -65,12 +58,13 @@ type UDPPlayer struct {
   packetBuffer      []byte
   packetBufferTail  int
   packetBufferEmpty bool
+
+  connector         *UDPConnector
 }
 
 func NewPlayer(in chan UDPMsg, id uuid.UUID, factory UDPMsgFactory) *UDPPlayer {
   var p UDPPlayer
   p.active = false
-  p.state = DISCONNECTED
   p.lastSync = 0
   p.lastPacketRx = 0
 
@@ -92,6 +86,8 @@ func NewPlayer(in chan UDPMsg, id uuid.UUID, factory UDPMsgFactory) *UDPPlayer {
   p.seqBuffer = make([]uint32, BUFFER_SIZE)
   p.packetData = make([]PacketData, BUFFER_SIZE)
   p.packetBuffer = make([]byte, BUFFER_SIZE)
+
+  p.connector = NewUDPConnector(500, 20)
 
   return &p
 }
@@ -221,7 +217,7 @@ func (p *UDPPlayer) PackAndSend() {
   shouldStop = shouldStop && p.txSeq == p.txAck
   shouldStop = shouldStop && p.shutupTx > SHUTUP_TIME
   shouldStop = shouldStop && p.shutupRx > SHUTUP_TIME
-  shouldStop = shouldStop || p.state < CONNECTED
+  shouldStop = shouldStop || p.connector.GetState() < CONNECTED
 
   if shouldStop && p.active {
     p.active = false
@@ -309,75 +305,17 @@ func (p *UDPPlayer) PackAndSend() {
 }
 
 // TODO: add sequence to this
-func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn) bool {
-  p.lastPacketRx = time.Now().UnixNano()
-  // Respond to HELLO with CHALLENGE
-  if p.state == DISCONNECTED {
-    // enforce padding to avoid participating in DDoS minification
-    if len(bytes) != helpers.GetConfig().MAX_MSG_SIZE {
-      log.Printf("Rejecting packet due to lack of padding.")
-      return false
-    }
-
-    cmd := UDPCmd(bytes[4])
-    if cmd == HELLO {
-      log.Printf("Received HELLO");
-      p.clientSalt = snet.Read_int64(bytes[5:13])
-      p.serverSalt = rand.Int63()
-      p.connection = conn
-
-      msgBytes := make([]byte, helpers.GetConfig().MAX_MSG_SIZE)
-      binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
-      msgBytes[4] = byte(CHALLENGE)
-      binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(p.clientSalt))
-      binary.LittleEndian.PutUint64(msgBytes[13:21], uint64(p.serverSalt))
-      p.sendRepeating(msgBytes, 500, 20)
-      p.state = CHALLENGED
-    }
-
-    return false
-  }
-
-  if p.state == CHALLENGED {
-    // enforce padding to avoid participating in DDoS minification
-    if len(bytes) != helpers.GetConfig().MAX_MSG_SIZE {
-      log.Printf("Rejecting packet due to lack of padding.")
-      return false
-    }
-
-    cmd := UDPCmd(bytes[4])
-    log.Printf("%d", cmd)
-    if cmd == CHALLENGE {
-      challengeResponse := snet.Read_int64(bytes[5:13])
-      if challengeResponse == p.clientSalt ^ p.serverSalt {
-        p.state = CONNECTED
-        log.Printf("%v is welcome.", p.Id)
-        msgBytes := make([]byte, 13)
-        binary.LittleEndian.PutUint32(msgBytes[0:4], helpers.GetProtocolId())
-        msgBytes[4] = byte(WELCOME)
-        binary.LittleEndian.PutUint64(msgBytes[5:13], uint64(p.clientSalt ^ p.serverSalt))
-        p.sendRepeating(msgBytes, 500, 20)
-        return true
-      }
-    }
-
-    return false
-  }
-
-  return false
+func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn, ip string) bool {
+  return p.connector.Authenticate(bytes, conn, ip)
 }
 
 func (p *UDPPlayer) Disconnect() {
   close(p.Outgoing)
-  p.state = DISCONNECTED
+  p.connector.Disconnect()
 }
 
-func (p *UDPPlayer) SetState(s UDPPlayerState) {
-  p.state = s
-}
-
-func (p *UDPPlayer) GetState() UDPPlayerState {
-  return p.state
+func (p *UDPPlayer) GetState() UDPConnectorState {
+  return p.connector.GetState()
 }
 
 func (p *UDPPlayer) IsActive() bool {

@@ -261,7 +261,6 @@ func (ps *physicsServer) ipIsValid(ip string) bool {
 }
 
 // Event Handler
-
 func (ps *physicsServer) OnShutdown(srv gnet.Server) {
   ps.state = snet.DEAD
   ps.worldConn.Close()
@@ -291,7 +290,7 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
         if valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId() {
           if plr.GetState() >= udp.CONNECTED {
             plr.Unpack(bytes[4:])
-          } else if plr.AuthenticateConnection(bytes, connection) {
+          } else if plr.AuthenticateConnection(bytes, connection, ipString) {
             ps.players.Add(plr)
           }
         }
