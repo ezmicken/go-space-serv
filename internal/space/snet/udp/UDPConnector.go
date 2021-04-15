@@ -106,6 +106,21 @@ func (this *UDPConnector) Authenticate(bytes []byte, conn gnet.Conn, ip string) 
   return false
 }
 
+func (this *UDPConnector) GetSalt() int64 {
+  return this.clientSalt ^ this.serverSalt
+}
+
+func (this *UDPConnector) GetConnection() gnet.Conn {
+  return this.connection
+}
+
+func (this *UDPConnector) Shutup() {
+  if this.spamChan != nil {
+    close(this.spamChan)
+    this.spamChan = nil
+  }
+}
+
 func (this *UDPConnector) sendRepeating(msg []byte) {
   if this.spamChan != nil {
     close(this.spamChan)
@@ -127,6 +142,7 @@ func (this *UDPConnector) sendRepeating(msg []byte) {
     for i := 0; i < this.count; i++ {
       _, open := <-currentChan
       if !open {
+        log.Printf("spamchan closed")
         return
       }
 
