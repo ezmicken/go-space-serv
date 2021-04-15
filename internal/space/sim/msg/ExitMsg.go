@@ -2,6 +2,7 @@ package msg
 
 import (
   "encoding/binary"
+  "github.com/google/uuid"
   "go-space-serv/internal/space/snet/udp"
 )
 
@@ -25,3 +26,5 @@ func (msg *ExitMsg) GetSize() int {
 }
 
 func (msg *ExitMsg) Deserialize(bytes []byte, head int) int { return head }
+func (msg *ExitMsg) SetPlayerId(id uuid.UUID) {}
+func (msg *ExitMsg) GetPlayerId() uuid.UUID { return uuid.UUID{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} }

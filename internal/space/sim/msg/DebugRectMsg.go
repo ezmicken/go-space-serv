@@ -3,6 +3,7 @@ package msg
 import(
   "math"
   "encoding/binary"
+  "github.com/google/uuid"
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/geom"
 )
@@ -38,3 +39,5 @@ func (msg *DebugRectMsg) GetSize() int {
 }
 
 func (msg *DebugRectMsg) Deserialize(bytes []byte, head int) int { return head }
+func (msg *DebugRectMsg) SetPlayerId(id uuid.UUID) {}
+func (msg *DebugRectMsg) GetPlayerId() uuid.UUID { return uuid.UUID{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} }

@@ -34,3 +34,5 @@ func (msg *EnterMsg) GetSize() int {
 }
 
 func (msg *EnterMsg) Deserialize(bytes []byte, head int) int { return head }
+func (msg *EnterMsg) SetPlayerId(id uuid.UUID) {}
+func (msg *EnterMsg) GetPlayerId() uuid.UUID { return uuid.UUID{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} }
