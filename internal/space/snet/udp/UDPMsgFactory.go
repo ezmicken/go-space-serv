@@ -4,5 +4,5 @@ import(
   "github.com/google/uuid"
 )
 type UDPMsgFactory interface {
-  CreateAndPublishMsg([]byte, int, chan UDPMsg, uuid.UUID) int
+  CreateAndPublishMsg(uint16, []byte, int, chan UDPMsg, uuid.UUID) int
 }

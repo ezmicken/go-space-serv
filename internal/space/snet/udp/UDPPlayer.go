@@ -3,9 +3,7 @@ package udp
 import (
   "log"
   "math"
-  //"math/rand"
   "time"
-  //"encoding/binary"
 
   "github.com/panjf2000/gnet"
   "github.com/google/uuid"
@@ -34,14 +32,9 @@ type UDPPlayer struct {
   connection        gnet.Conn
   msgFactory        UDPMsgFactory
 
-  spamChan          chan struct{}
   active            bool
   lastSync          int64
   lastPacketRx      int64
-
-  // packet stuff
-  clientSalt        int64
-  serverSalt        int64
 
   seqBuffer         []uint32
   packetData        []PacketData
@@ -129,48 +122,15 @@ func (p *UDPPlayer) getMsg() UDPMsg {
   return tmp
 }
 
-// Sends a packet every rate milliseconds count times
-func (p *UDPPlayer) sendRepeating(msg []byte, rate, count int) {
-  if p.spamChan != nil {
-    close(p.spamChan)
-  }
-
-  ticker := time.NewTicker(time.Duration(rate) * time.Millisecond)
-  defer ticker.Stop()
-
-  log.Printf("sending first %d", msg[4])
-  p.connection.SendTo(msg)
-
-  // Use a local reference to the chan
-  // for the case where it was closed
-  // and re-opened during Sleep
-  thisChan := make(chan struct{})
-  p.spamChan = thisChan
-
-  go func() {
-    for i := 0; i < count; i++ {
-      _, open := <-thisChan
-      if !open {
-        return
-      }
-
-      log.Printf("sending %d (iteration %d)", msg[4], i)
-      p.connection.SendTo(msg)
-      <- ticker.C
-    }
-
-    log.Printf("Player.sendRepeating finished all iterations.")
-    close(thisChan)
-  }()
-}
-
 func (p *UDPPlayer) Unpack(packet []byte) {
+  p.connector.Shutup()
   head := 8
   tail := 0
   salt := snet.Read_int64(packet[tail:head])
   tail = head
   msgLen := len(packet)
-  if salt != (p.clientSalt ^ p.serverSalt) {
+  if salt != p.connector.GetSalt() {
+    log.Printf("bad salt %v", salt)
     return
   }
 
@@ -178,15 +138,21 @@ func (p *UDPPlayer) Unpack(packet []byte) {
 
   // handle seq/ack
   head += 2
-  seq := snet.Read_uint16(packet[tail:head])
+  ack := snet.Read_uint16(packet[tail:head])
   tail = head
   head += 2
-  ack := snet.Read_uint16(packet[tail:head])
+  seq := snet.Read_uint16(packet[tail:head])
+  tail = head
+  head++
+  redundant := packet[tail]
   tail = head
 
   if seqGreaterThan(ack, p.txAck) {
+    numAcks := ack - p.txAck
     p.txAck = ack
-    p.onPacketAcked(seq)
+    for i := uint16(0); i < numAcks; i++ {
+      p.onPacketAcked(ack - i)
+    }
   }
 
   if (head < msgLen) {
@@ -198,13 +164,12 @@ func (p *UDPPlayer) Unpack(packet []byte) {
     } else {
       p.shutupRx = 0
     }
-
     if seqGreaterThan(seq, p.rxSeq) {
       p.rxSeq = seq
-      log.Printf("rx: %v", cmd)
-
+      packetSeq := seq - uint16(redundant)
       for head < msgLen {
-        head = p.msgFactory.CreateAndPublishMsg(packet, head, p.incoming, p.Id)
+        head = p.msgFactory.CreateAndPublishMsg(packetSeq, packet, head, p.incoming, p.Id)
+        packetSeq++;
       }
     }
   }
@@ -213,8 +178,12 @@ func (p *UDPPlayer) Unpack(packet []byte) {
 func (p *UDPPlayer) PackAndSend() {
   numMsgs := len(p.Outgoing)
 
+  // Cache these in case they change while we're working.
+  txAckedBytesCache := p.txAckedBytes
+  txAckCache := p.txAck
+
   shouldStop := numMsgs == 0
-  shouldStop = shouldStop && p.txSeq == p.txAck
+  shouldStop = shouldStop && p.txSeq == txAckCache
   shouldStop = shouldStop && p.shutupTx > SHUTUP_TIME
   shouldStop = shouldStop && p.shutupRx > SHUTUP_TIME
   shouldStop = shouldStop || p.connector.GetState() < CONNECTED
@@ -232,43 +201,31 @@ func (p *UDPPlayer) PackAndSend() {
 
   var header UDPHeader
   header.ProtocolId = helpers.GetProtocolId()
-  header.Salt = p.clientSalt ^ p.serverSalt
-  header.Ack = p.rxSeq
+  header.Salt = p.connector.GetSalt()
+  header.Seq = p.txSeq
 
   // Client has acknowledged all our messages
-  if numMsgs == 0 && p.txSeq == p.txAck {
+  if numMsgs == 0 && p.txSeq == txAckCache {
     header.Seq = p.txSeq
-    var pd PacketData
-    pd.Acked = false
-    pd.SendTime = helpers.NowMillis()
-    pd.Size = 1
-    p.insertPacketData(pd, p.txSeq)
+    header.Ack = p.rxSeq
     p.packetBuffer[HEADER_SIZE] = byte(SHUTUP)
     p.packetBufferEmpty = true
     p.shutupTx++
     header.Serialize(p.packetBuffer)
-    p.connection.SendTo(p.packetBuffer[:HEADER_SIZE+1])
+    p.connector.GetConnection().SendTo(p.packetBuffer[:HEADER_SIZE+1])
     return
   } else {
     p.shutupTx = 0
   }
 
-  // Move the tail based on newest ack
-  // p.packetBufferTail = HEADER_SIZE
-  // for i := p.txSeq; i < p.txAck; i-- {
-  //   pd := p.getPacketData(i)
-  //   p.packetBufferTail += int(pd.Size)
-  // }
-
-  if p.txAckedBytes > p.prevAckedBytes {
-    ackedBytes := int(p.txAckedBytes - p.prevAckedBytes)
+  if txAckedBytesCache > p.prevAckedBytes {
+    ackedBytes := int(txAckedBytesCache - p.prevAckedBytes)
     for i := 0; i < ackedBytes; i++ {
       // TODO: stop this from overflowing.
       p.packetBuffer[HEADER_SIZE + i] = p.packetBuffer[HEADER_SIZE + ackedBytes + i];
     }
     p.packetBufferTail -= ackedBytes
     p.prevAckedBytes = p.txAckedBytes
-    log.Printf("tail moved left %v(%v)", ackedBytes, p.packetBufferTail)
   }
 
   for j := 0; j < 50; j++ {
@@ -277,20 +234,19 @@ func (p *UDPPlayer) PackAndSend() {
       break
     }
 
-    msg := tmp.(UDPMsg)
-    msgSize := msg.GetSize()
+    m := tmp.(UDPMsg)
+    msgSize := m.GetSize()
     if p.packetBufferTail + msgSize >= int(BUFFER_SIZE) {
-      p.Outgoing <- msg
+      p.Outgoing <- m
       log.Printf("%v packetBuffer overflow.", p.Id)
     }
 
+    header.Redundant = byte(p.txSeq - txAckCache)
     p.txSeq++
     header.Seq = p.txSeq
-    log.Printf("tx: %v", msg.GetCmd())
-    msg.Serialize(p.packetBuffer[p.packetBufferTail : p.packetBufferTail+msgSize])
+    m.Serialize(p.packetBuffer[p.packetBufferTail : p.packetBufferTail+msgSize])
     p.packetBufferTail += msgSize
     p.packetBufferEmpty = false;
-    log.Printf("tail moved right %v(%v)", msgSize, p.packetBufferTail)
 
     var pd PacketData
     pd.Acked = false
@@ -298,14 +254,16 @@ func (p *UDPPlayer) PackAndSend() {
     pd.Size = int32(msgSize)
     p.insertPacketData(pd, p.txSeq)
 
-    msg = nil
+    m = nil
   }
+  header.Ack = p.rxSeq
   header.Serialize(p.packetBuffer)
-  p.connection.SendTo(p.packetBuffer[:p.packetBufferTail])
+  p.connector.GetConnection().SendTo(p.packetBuffer[:p.packetBufferTail])
 }
 
 // TODO: add sequence to this
 func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn, ip string) bool {
+  p.lastPacketRx = time.Now().UnixNano()
   return p.connector.Authenticate(bytes, conn, ip)
 }
 
