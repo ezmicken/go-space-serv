@@ -18,7 +18,7 @@ type SimPlayer struct {
   state           int
 }
 
-const PING_TIME   int64 = 500000000
+const PING_TIME   int64 = 200000000
 const SPECTATING  int   = 0
 const PLAYING     int   = 1
 const CULL        int   = 2
