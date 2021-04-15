@@ -8,6 +8,7 @@ type Config struct {
   VERSION string
   PROTOCOL_ID uint32
   MAX_MSG_SIZE int
+  ECHO_INPUT bool
 }
 
 var configInstance *Config
@@ -18,3 +19,4 @@ func GetConfiguredTimestep()      int64   { return configInstance.TIMESTEP }
 func GetConfiguredTimestepNanos() int64   { return configInstance.TIMESTEP_NANO }
 func GetConfiguredWorldRate()     int     { return configInstance.WORLD_RATE }
 func GetProtocolId()              uint32  { return configInstance.PROTOCOL_ID }
+func ShouldEchoInput()            bool    { return configInstance.ECHO_INPUT }

@@ -73,6 +73,7 @@ func main() {
   flagTimestepNano := flag.Int64("timestepNano", 33000000, "physics timestep in nanoseconds")
   flagProtocolId := flag.Uint("protocolId", 3551548956, "value must match client")
   flagWorldRate := flag.Int("worldRate", 12, "physics frames passing before sending state update to world.")
+  flagEchoInput := flag.Bool("echoInput", false, "echo a player's input back to them for debugging purposes.")
 
   p := goroutine.Default()
   defer p.Release()
@@ -106,6 +107,7 @@ func main() {
   config.PROTOCOL_ID = uint32(*flagProtocolId)
   config.MAX_MSG_SIZE = 1024
   config.WORLD_RATE = *flagWorldRate
+  config.ECHO_INPUT = *flagEchoInput
   helpers.SetConfig(&config)
 
   log.Printf("PROTOCOL_ID: %d", config.PROTOCOL_ID)
@@ -113,7 +115,7 @@ func main() {
   // Initialize UDP server
   ps := &physicsServer{
     pool: p,
-    tick: 8333333,
+    tick: time.Duration(*flagTimestepNano),
     launchTime: time.Now().UnixNano(),
     state: snet.DEAD,
     worldConnOpen: false,

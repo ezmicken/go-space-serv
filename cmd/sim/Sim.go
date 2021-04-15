@@ -11,7 +11,6 @@ import (
   "github.com/ezmicken/uuint16"
   "github.com/google/uuid"
 
-  "go-space-serv/internal/space/geom"
   "go-space-serv/internal/space/util"
   "go-space-serv/internal/space/world"
   "go-space-serv/internal/space/sim/msg"
@@ -145,22 +144,22 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
           cb := s.space.GetControlledBody(bodyId)
           if cb != nil {
             //log.Printf("%v: input received for %v", seq, m.Tick)
-            cb.PushInput((m.Tick + 12), m.MoveShoot)
-            m.BodyId = bodyId
             m.Tick += 12
+            cb.PushInput(m.Tick, m.MoveShoot)
             s.players.PushExcluding(playerId, m)
+            if helpers.ShouldEchoInput() {
+              s.players.Push(playerId, m)
+            }
           }
         }
 
         break
       default:
+        log.Printf("Unknown message.")
     }
   }
 
   notifyWorld := seq % helpers.GetConfiguredWorldRate() == 0
-  //x := float32(-1)
-  //y := float32(-1)
-
 
   worldMsg := []byte{}
   head := 1
@@ -196,13 +195,6 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
       nextPos := cb.GetBody().NextPos
       x := nextPos.X.Float()
       y := nextPos.Y.Float()
-      // TODO: put this behind config flag
-      if player != nil && player.IsPlaying() {
-        var debugMsg msg.DebugRectMsg
-        debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
-        debugMsg.Seq = uint16(seq)
-        player.Udp.Outgoing <- &debugMsg
-      }
       if notifyWorld {
         xCoord, yCoord := s.worldMap.GetCellFromPosition(x, y)
         worldMsg = append(worldMsg, []byte{0, 0, 0, 0, 0, 0}...)
