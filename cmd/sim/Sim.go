@@ -38,6 +38,8 @@ type Sim struct {
   serializedStateSize int
 }
 
+var bodyIdsPerPlayer int = 512
+
 func (s *Sim) Start(worldMap *world.WorldMap, players *SimPlayers, worldChan chan []byte) {
   s.players = players
   s.toWorld = worldChan
@@ -228,12 +230,24 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
 
 // Actions
 //////////////
-
 func (s *Sim) spawnPlayer(player *SimPlayer) {
   playerId := player.Udp.Id
   x, y := s.worldMap.GetSpawnPoint()
+
+
+  // Reserve some body ids for player projectiles.
+  // TODO: handle these errors. @ 512 it should support 100 ish players.
   pBodId, err := uuint16.Rent()
   if err != nil { panic(err.Error()) }
+  rangeStart, err2 := uuint16.Rent()
+  if err2 != nil { panic(err2.Error()) }
+  for i := 0; i < bodyIdsPerPlayer-1; i++ {
+    _, err3 := uuint16.Rent()
+    if err3 != nil { panic(err3.Error()) }
+  }
+  rangeEnd := rangeStart + uint16(bodyIdsPerPlayer)
+  player.SetBodyIdRange(rangeStart, rangeEnd)
+
   s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), int32(1))
   s.bodyIdsByPlayer.Store(playerId, pBodId)
   player.OnEnter()
@@ -244,6 +258,8 @@ func (s *Sim) spawnPlayer(player *SimPlayer) {
   var response msg.EnterMsg
   response.PlayerId = player.Udp.Id
   response.BodyId = pBodId
+  response.RangeStart = rangeStart
+  response.RangeEnd = rangeEnd
   response.X = uint32(world.SPAWNX)
   response.Y = uint32(world.SPAWNY)
   s.players.PushAll(&response)
@@ -265,6 +281,12 @@ func (s *Sim) specPlayer(player *SimPlayer) {
       s.space.RemoveControlledBody(bodyId)
       s.bodyIdsByPlayer.Delete(playerId)
       player.OnExit()
+
+      rangeStart := player.GetBodyIdRangeStart()
+      for i := 0; i < bodyIdsPerPlayer; i++ {
+        log.Printf("returning %v", (rangeStart + uint16(i)))
+        uuint16.Return(rangeStart + uint16(i))
+      }
 
       // tell other playesr
       var response msg.ExitMsg

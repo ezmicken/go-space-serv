@@ -15,6 +15,9 @@ type SimPlayer struct {
   lastPingTime    int64
   lastActiveState bool
 
+  rangeStart      uint16
+  rangeEnd        uint16
+
   state           int
 }
 
@@ -73,4 +76,13 @@ func (s *SimPlayer) OnPackAndSend() {
       s.Udp.Outgoing <- &ping
     }
   }
+}
+
+func (s *SimPlayer) SetBodyIdRange(start, end uint16) {
+  s.rangeStart = start
+  s.rangeEnd = end
+}
+
+func (s *SimPlayer) GetBodyIdRangeStart() uint16 {
+  return s.rangeStart
 }
