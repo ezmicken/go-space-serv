@@ -15,6 +15,9 @@ type SimPlayer struct {
   lastPingTime    int64
   lastActiveState bool
 
+  bodyIdPool      []uint16
+  bodyIdIdx       int
+  bodyIdRange     int
   rangeStart      uint16
   rangeEnd        uint16
 
@@ -48,10 +51,16 @@ func (s *SimPlayer) ShouldCull()    bool { return s.state == CULL }
 
 func (s *SimPlayer) OnEnter() {
   s.state = PLAYING
+  s.bodyIdPool = make([]uint16, s.rangeEnd - s.rangeStart)
+  for i := 0; i < s.bodyIdRange; i++ {
+    s.bodyIdPool[i] = s.rangeStart + uint16(i)
+  }
+  s.bodyIdIdx = 0
 }
 
 func (s *SimPlayer) OnExit() {
   s.state = SPECTATING
+  s.bodyIdPool = nil
 }
 
 func (s *SimPlayer) OnDisconnect() {
@@ -81,6 +90,8 @@ func (s *SimPlayer) OnPackAndSend() {
 func (s *SimPlayer) SetBodyIdRange(start, end uint16) {
   s.rangeStart = start
   s.rangeEnd = end
+  rnge := end - start
+  s.bodyIdRange = int(rnge)
 }
 
 func (s *SimPlayer) GetBodyIdRangeStart() uint16 {
