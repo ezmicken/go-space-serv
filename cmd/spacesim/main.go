@@ -47,6 +47,16 @@ func AddControlledBody(id uint16, x, y, d int32) {
   sim.AddControlledBody(id, x, y, d)
 }
 
+//export AddBody
+func AddBody(id uint16, x, y, vx, vy float32) {
+  sim.AddBody(id, x, y, vx, vy)
+}
+
+//export RemoveBody
+func RemoveBody(id uint16) {
+  sim.RemoveBody(id)
+}
+
 //export OverwriteState
 func OverwriteState(seq, id, angle, angleDelta uint16, x, y, vx, vy, dvx, dvy int32) {
   sim.OverwriteState(seq, id, angle, angleDelta, x, y, vx, vy, dvx, dvy)
