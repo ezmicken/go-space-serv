@@ -48,8 +48,8 @@ func AddControlledBody(id uint16, x, y, d int32) {
 }
 
 //export AddBody
-func AddBody(id uint16, x, y, vx, vy float32) {
-  sim.AddBody(id, x, y, vx, vy)
+func AddBody(id uint16, x, y, vx, vy float32, s int32) {
+  sim.AddBody(id, x, y, vx, vy, s)
 }
 
 //export RemoveBody
@@ -150,11 +150,31 @@ func GetPositionY(id, seq uint16) float32 {
   return 0
 }
 
-//export AddBlock
-func AddBlock(id uint16, x, y int32) {
+//export GetVelocityX
+func GetVelocityX(id, seq uint16) float32 {
   cb := sim.GetControlledBody(id)
   if cb != nil {
-    cb.AddBlock(x, y)
+    return cb.GetVelocityX(seq).Float()
+  }
+
+  return 0
+}
+
+//export GetVelocityY
+func GetVelocityY(id, seq uint16) float32 {
+  cb := sim.GetControlledBody(id)
+  if cb != nil {
+    return cb.GetVelocityY(seq).Float()
+  }
+
+  return 0
+}
+
+//export AddBlock
+func AddBlock(id uint16, x, y int32) {
+  b := sim.GetBody(id)
+  if b != nil {
+    b.AddBlock(x, y)
   }
 }
 
