@@ -32,6 +32,18 @@ func (msg *PlayerInfoMsg) Serialize(packet []byte, head int) int {
   head += 4
   binary.LittleEndian.PutUint32(packet[head:head+4], math.Float32bits(msg.Stats.Rotation))
   head += 4
+  binary.LittleEndian.PutUint32(packet[head:head+4], math.Float32bits(msg.Stats.BombSpeed))
+  head += 4
+  binary.LittleEndian.PutUint32(packet[head:head+4], math.Float32bits(msg.Stats.BombRadius))
+  head += 4
+  binary.LittleEndian.PutUint32(packet[head:head+4], math.Float32bits(msg.Stats.BombProximity))
+  head += 4
+  binary.LittleEndian.PutUint16(packet[head:head+4], uint16(msg.Stats.BombRate))
+  head += 2
+  binary.LittleEndian.PutUint16(packet[head:head+4], uint16(msg.Stats.BombLife))
+  head += 2
+  packet[head] = byte(msg.Stats.BombBounces)
+  head++
   return head
 }
 func (msg *PlayerInfoMsg) Deserialize(packet []byte, head int) int { return 0 }

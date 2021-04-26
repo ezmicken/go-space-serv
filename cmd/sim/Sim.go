@@ -284,7 +284,6 @@ func (s *Sim) specPlayer(player *SimPlayer) {
 
       rangeStart := player.GetBodyIdRangeStart()
       for i := 0; i < bodyIdsPerPlayer; i++ {
-        log.Printf("returning %v", (rangeStart + uint16(i)))
         uuint16.Return(rangeStart + uint16(i))
       }
 
