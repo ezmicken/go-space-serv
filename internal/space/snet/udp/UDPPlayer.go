@@ -220,7 +220,7 @@ func (p *UDPPlayer) PackAndSend() {
 
   if txAckedBytesCache > p.prevAckedBytes {
     ackedBytes := int(txAckedBytesCache - p.prevAckedBytes)
-    for i := 0; i < ackedBytes; i++ {
+    for i := 0; i < p.packetBufferTail; i++ {
       // TODO: stop this from overflowing.
       p.packetBuffer[HEADER_SIZE + i] = p.packetBuffer[HEADER_SIZE + ackedBytes + i];
     }
