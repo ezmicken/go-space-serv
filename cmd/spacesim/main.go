@@ -43,13 +43,13 @@ func PeekSeq(id uint16) uint16 {
 }
 
 //export AddControlledBody
-func AddControlledBody(id uint16, x, y, d int32) {
-  sim.AddControlledBody(id, x, y, d)
+func AddControlledBody(id uint16, x, y, d int32, b float32) {
+  sim.AddControlledBody(id, x, y, d, b)
 }
 
 //export AddBody
-func AddBody(id uint16, x, y, vx, vy float32, s int32) {
-  sim.AddBody(id, x, y, vx, vy, s)
+func AddBody(id uint16, x, y, vx, vy, b float32, s int32) {
+  sim.AddBody(id, x, y, vx, vy, b, s)
 }
 
 //export RemoveBody
