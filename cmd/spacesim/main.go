@@ -1,10 +1,27 @@
 package main
 
+/*
+  #include "main.h"
+*/
+import "C"
+
 import(
-  "C"
   "github.com/ezmicken/spacesim"
   "github.com/ezmicken/fixpoint"
 )
+
+func convertBodyInfo(bi C.BodyInfo) spacesim.BodyInfo {
+  var result spacesim.BodyInfo = spacesim.BodyInfo {
+    Id: uint16(bi.Id),
+    Size: int32(bi.Size),
+    Proximity: int32(bi.Proximity),
+    Lifetime: int32(bi.Lifetime),
+    BounceCoefficient: float32(bi.BounceCoefficient),
+    VelocityX: float32(bi.VelocityX),
+    VelocityY: float32(bi.VelocityY),
+  }
+  return result
+}
 
 var sim *spacesim.Simulation
 
@@ -43,13 +60,13 @@ func PeekSeq(id uint16) uint16 {
 }
 
 //export AddControlledBody
-func AddControlledBody(id uint16, x, y, d int32, b float32) {
-  sim.AddControlledBody(id, x, y, d, b)
+func AddControlledBody(id uint16, x, y int32, bodyInfo C.BodyInfo) {
+  sim.AddControlledBody(id, x, y, convertBodyInfo(bodyInfo))
 }
 
 //export AddBody
-func AddBody(id uint16, x, y, vx, vy, b float32, s int32) {
-  sim.AddBody(id, x, y, vx, vy, b, s)
+func AddBody(id uint16, x, y float32, bodyInfo C.BodyInfo) {
+  sim.AddBody(id, x, y, convertBodyInfo(bodyInfo))
 }
 
 //export RemoveBody
