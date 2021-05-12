@@ -1,3 +1,4 @@
+//+build windows darwin
 package main
 
 /*
@@ -185,6 +186,28 @@ func GetVelocityY(id, seq uint16) float32 {
   }
 
   return 0
+}
+
+//export GetMovement
+func GetMovement(id uint16) (posX, posY, velX, velY, time float32) {
+  b := sim.GetBody(id)
+  if b != nil {
+    m := b.GetMovement()
+    posX = m.PositionX
+    posY = m.PositionY
+    velX = m.VelocityX
+    velY = m.VelocityY
+    time = m.Time
+    return
+  }
+
+  posX = 0.0
+  posY = 0.0
+  velX = 0.0
+  velY = 0.0
+  time = 0.0
+
+  return
 }
 
 //export AddBlock

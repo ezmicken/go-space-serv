@@ -1,3 +1,4 @@
+//+build windows darwin
 #include <stdint.h>
 
 typedef struct BodyInfo {
