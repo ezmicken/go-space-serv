@@ -145,9 +145,10 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
           bodyId := id.(uint16)
           cb := s.space.GetControlledBody(bodyId)
           if cb != nil {
-            //log.Printf("%v: input received for %v", seq, m.Tick)
+            //log.Printf("%v: input received for %v (%v)", seq, m.Tick, bodyId)
             m.Tick += 12
             cb.PushInput(m.Tick, m.MoveShoot)
+            m.BodyId = bodyId
             s.players.PushExcluding(playerId, m)
             if helpers.ShouldEchoInput() {
               s.players.Push(playerId, m)
@@ -248,7 +249,16 @@ func (s *Sim) spawnPlayer(player *SimPlayer) {
   rangeEnd := rangeStart + uint16(bodyIdsPerPlayer)
   player.SetBodyIdRange(rangeStart, rangeEnd)
 
-  s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), int32(1))
+  bi := spacesim.BodyInfo {
+    pBodId,
+    48,
+    0,
+    -1,
+    0.5,
+    0.0,
+    0.0,
+  }
+  s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), bi)
   s.bodyIdsByPlayer.Store(playerId, pBodId)
   player.OnEnter()
 
@@ -270,6 +280,10 @@ func (s *Sim) spawnPlayer(player *SimPlayer) {
 
   worldSpawnMsg = append(worldSpawnMsg,  playerId[0:]...)
   s.toWorld <- worldSpawnMsg
+}
+
+func (s *Sim) RemovePlayer(id uuid.UUID) {
+  s.players.Remove(id)
 }
 
 func (s *Sim) specPlayer(player *SimPlayer) {
