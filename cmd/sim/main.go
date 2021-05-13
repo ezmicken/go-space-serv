@@ -217,7 +217,7 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
               ip := net.IP(ipBytes)
               reader.Discard(int(ipLen[0]))
 
-              plr := udp.NewPlayer(ps.simulation.GetPlayerChan(), playerId, &ps.msgFactory)
+              plr := udp.NewPlayer(ps.simulation.GetPlayerChan(), playerId, &SimMsgFactory{0})
               if plr != nil {
                 ps.ipsToPlayers.Store(ip.String(), plr)
                 log.Printf("Storing %s <-> %v", ip.String(), playerId)
@@ -226,12 +226,32 @@ func (ps *physicsServer) worldRx(laddr, raddr *net.TCPAddr) {
           }
         }
       } else if event[0] == byte(snet.ILeave) {
+        var ipLen []byte
+        var ipBytes []byte
         var idBytes []byte
         idBytes, err = reader.Peek(16)
         if err == nil {
           reader.Discard(16)
           playerId, _ := uuid.FromBytes(idBytes)
           ps.players.Remove(playerId)
+          ipLen, err = reader.Peek(1)
+          if err == nil {
+            reader.Discard(1)
+            ipBytes, err = reader.Peek(int(ipLen[0]))
+            if err == nil {
+              ip := net.IP(ipBytes)
+              reader.Discard(int(ipLen[0]))
+              ps.ipsToPlayers.Delete(ip.String())
+              log.Printf("Deleting %s <-> %v", ip.String(), playerId)
+              ps.simulation.RemovePlayer(playerId)
+            } else {
+              log.Printf("%v", err.Error())
+            }
+          } else {
+            log.Printf("%v", err.Error())
+          }
+        } else {
+          log.Printf("%v", err.Error())
         }
       } else if event[0] == byte(snet.IShutdown) {
         ps.state = snet.SHUTDOWN
@@ -289,12 +309,15 @@ func (ps *physicsServer) React(data []byte, connection gnet.Conn) (out []byte, a
       tmp, ok := ps.ipsToPlayers.Load(ipString)
       if ok {
         plr := tmp.(*udp.UDPPlayer)
-        if valid && snet.Read_uint32(bytes[0:4]) == helpers.GetProtocolId() {
+        protocolId := snet.Read_uint32(bytes[0:4])
+        if valid && protocolId == helpers.GetProtocolId() {
           if plr.GetState() >= udp.CONNECTED {
             plr.Unpack(bytes[4:])
           } else if plr.AuthenticateConnection(bytes, connection, ipString) {
             ps.players.Add(plr)
           }
+        } else {
+          log.Printf("Rejecting packet %v %v", valid, protocolId)
         }
       }
 

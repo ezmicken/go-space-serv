@@ -128,6 +128,11 @@ func (ws *worldServer) closePlayerConnection(c gnet.Conn) {
     // Tell physics about this
     packet := []byte{byte(snet.ILeave)}
     packet = append(packet, playerId[0:]...)
+
+    addr := c.RemoteAddr().(*net.TCPAddr).IP
+    packet = append(packet, byte(len(addr)))
+    packet = append(packet, addr...)
+
     ws.physics.AsyncWrite(packet)
   }
 }
