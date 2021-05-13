@@ -268,7 +268,11 @@ func (p *UDPPlayer) AuthenticateConnection(bytes []byte, conn gnet.Conn, ip stri
 }
 
 func (p *UDPPlayer) Disconnect() {
-  close(p.Outgoing)
+  // the channel can be mysteriously closed.
+  // check if it's closed before attempting to close it.
+  _, ok := <- p.Outgoing
+  if ok { close(p.Outgoing) }
+
   p.connector.Disconnect()
 }
 
