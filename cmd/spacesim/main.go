@@ -1,4 +1,4 @@
-//+build windows darwin
+//+build windows darwindele
 package main
 
 /*
@@ -60,9 +60,9 @@ func PeekSeq(id uint16) uint16 {
   return 0
 }
 
-//export AddControlledBody
-func AddControlledBody(id uint16, x, y int32, bodyInfo C.BodyInfo) {
-  sim.AddControlledBody(id, x, y, convertBodyInfo(bodyInfo))
+//export ControlBody
+func ControlBody(id uint16, rotationSpeed int32, thrust, maxSpeed float32) {
+  sim.ControlBody(id, rotationSpeed, thrust, maxSpeed)
 }
 
 //export AddBody
