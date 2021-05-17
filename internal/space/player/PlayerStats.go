@@ -15,9 +15,9 @@ type PlayerStats struct {
 func DefaultPlayerStats() PlayerStats{
   var ps PlayerStats
 
-  ps.Thrust = 12
+  ps.Thrust = 0.36
   ps.MaxSpeed = 20
-  ps.Rotation = 264
+  ps.Rotation = 9
   ps.BombRate = 750
   ps.BombSpeed = 32
   ps.BombRadius = 64
