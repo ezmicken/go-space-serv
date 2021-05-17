@@ -3,6 +3,7 @@
 
 typedef struct BodyInfo {
   short Id;
+  short Owner;
   int Size;
   int Proximity;
   int Lifetime;

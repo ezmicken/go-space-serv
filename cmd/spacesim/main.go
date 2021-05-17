@@ -14,6 +14,7 @@ import(
 func convertBodyInfo(bi C.BodyInfo) spacesim.BodyInfo {
   var result spacesim.BodyInfo = spacesim.BodyInfo {
     Id: uint16(bi.Id),
+    Owner: uint16(bi.Owner),
     Size: int32(bi.Size),
     Proximity: int32(bi.Proximity),
     Lifetime: int32(bi.Lifetime),
