@@ -105,10 +105,10 @@ func (wm *WorldMap) serializeChunk(x, y int, id uint16) msg.BlocksMsg {
   return blocksMsg
 }
 
-func (wm *WorldMap) PushBlockRects(seq int, cb *spacesim.ControlledBody) {
+func (wm *WorldMap) PushBlockRects(seq int, body *spacesim.Body) {
   // TODO: find a better way to do this.
-  xPos := cb.GetPositionX(uint16(seq)-1)
-  yPos := cb.GetPositionY(uint16(seq)-1)
+  xPos := body.Pos.X
+  yPos := body.Pos.Y
   playerBox := geom.NewRect(xPos.Float() - 64, yPos.Float() - 64, 128, 128)
 
   // Get playerBox in block coordinates
@@ -209,7 +209,7 @@ func (wm *WorldMap) PushBlockRects(seq int, cb *spacesim.ControlledBody) {
         iBlx++
 
         if blockIsSolid {
-          cb.AddBlock(int32(blockBox.X + x), int32(blockBox.Y + y))
+          body.AddBlock(int32(blockBox.X + x), int32(blockBox.Y + y))
         }
       }
     }

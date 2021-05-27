@@ -16,10 +16,12 @@ import (
   "go-space-serv/internal/space/sim/msg"
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/snet"
+  "go-space-serv/internal/space/geom"
 )
 
 type Sim struct {
   space               *spacesim.Simulation
+  allBodies           []uint16
   bodyIdsByPlayer     sync.Map
   worldMap            *world.WorldMap
   players             *SimPlayers
@@ -77,11 +79,10 @@ func (s *Sim) loop() {
     framesToProcess = ((frameStart - s.lastSync) / timestepNano) - int64(s.seq)
     if framesToProcess > 0 {
       for i := int64(0); i < framesToProcess; i++ {
-        s.seq++
-        s.space.Advance(int(s.seq))
         s.lastFrame = s.lastSync + (int64(s.seq) * timestepNano)
         s.processFrame(s.lastFrame, int(s.seq))
-
+        s.seq++
+        s.space.Advance(int(s.seq))
         if s.seq == 0 {
           shouldSync = true
           s.seq = 1
@@ -171,6 +172,20 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
     worldMsg = append(worldMsg, byte(snet.IState))
   }
 
+  var allBodiesCulled []uint16
+  numBodies := len(s.allBodies)
+  for i := 0; i < numBodies; i++ {
+    bodyId := s.allBodies[i]
+    bod := s.space.GetBody(bodyId)
+    if bod != nil && !bod.IsDead() {
+      allBodiesCulled = append(allBodiesCulled, bodyId)
+      s.worldMap.PushBlockRects(seq, bod)
+      bod.Advance(uint16(seq))
+    }
+    // TODO: add bomb type, track bounces
+  }
+  s.allBodies = allBodiesCulled
+
   // temporary storage for players that should be removed.
   var playersToSpec []*SimPlayer = nil
 
@@ -192,12 +207,10 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
     }
 
     cb := s.space.GetControlledBody(id)
-    if cb != nil {
-      s.worldMap.PushBlockRects(seq, cb)
+    if cb != nil && !cb.GetBody().IsDead() {
       cb.Advance(uint16(seq))
-      nextPos := cb.GetBody().NextPos
-      x := nextPos.X.Float()
-      y := nextPos.Y.Float()
+      x := cb.GetBody().NextPos.X.Float()
+      y := cb.GetBody().NextPos.Y.Float()
       if notifyWorld {
         xCoord, yCoord := s.worldMap.GetCellFromPosition(x, y)
         worldMsg = append(worldMsg, []byte{0, 0, 0, 0, 0, 0}...)
@@ -208,6 +221,10 @@ func (s *Sim) processFrame(frameStart int64, seq int) {
         binary.LittleEndian.PutUint16(worldMsg[head:head+2], uint16(yCoord))
         head+= 2
       }
+      var debugMsg msg.DebugRectMsg
+      debugMsg.Seq = s.seq
+      debugMsg.R = geom.NewRect(x - 24, y - 24, 48, 48)
+      s.players.Push(playerId, &debugMsg)
     }
 
     return true
@@ -251,6 +268,7 @@ func (s *Sim) spawnPlayer(player *SimPlayer) {
 
   bi := spacesim.BodyInfo {
     pBodId,
+    pBodId,
     48,
     0,
     -1,
@@ -258,7 +276,10 @@ func (s *Sim) spawnPlayer(player *SimPlayer) {
     0.0,
     0.0,
   }
-  s.space.AddControlledBody(pBodId, int32(world.SPAWNX), int32(world.SPAWNY), bi)
+  s.space.AddBody(pBodId, x, y, bi)
+  s.allBodies = append(s.allBodies, pBodId)
+
+  s.space.ControlBody(pBodId, int32(player.Stats.Rotation), player.Stats.Thrust, player.Stats.MaxSpeed)
   s.bodyIdsByPlayer.Store(playerId, pBodId)
   player.OnEnter()
 

@@ -1,6 +1,7 @@
 package main
 
 import(
+  //"log"
   "time"
   "go-space-serv/internal/space/snet/udp"
   "go-space-serv/internal/space/sim/msg"
